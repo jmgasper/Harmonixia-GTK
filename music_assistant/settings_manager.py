@@ -70,6 +70,17 @@ def load_settings(app) -> None:
         output_alsa_device = ""
     app.output_alsa_device = output_alsa_device
 
+    eq_enabled = payload.get("eq_enabled", False)
+    if not isinstance(eq_enabled, bool):
+        eq_enabled = False
+    eq_selected_preset = payload.get("eq_selected_preset", None)
+    if isinstance(eq_selected_preset, str):
+        eq_selected_preset = eq_selected_preset.strip() or None
+    elif eq_selected_preset is not None:
+        eq_selected_preset = None
+    app.eq_enabled = eq_enabled
+    app.eq_selected_preset = eq_selected_preset
+
 
 def save_settings(app, server_url: str, auth_token: str) -> None:
     app.sendspin_manager.ensure_client_id()
@@ -154,6 +165,50 @@ def persist_output_selection(app, path: str | None = None) -> None:
     payload["output_backend"] = app.output_backend or ""
     payload["output_pulse_device"] = app.output_pulse_device or ""
     payload["output_alsa_device"] = app.output_alsa_device or ""
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(
+                payload,
+                handle,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=True,
+            )
+            handle.write("\n")
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to write settings to %s: %s",
+            path,
+            exc,
+        )
+
+
+def persist_eq_settings(app, path: str | None = None) -> None:
+    payload: dict[str, object] = {}
+    path = path or app.get_settings_path()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            existing = json.load(handle)
+        if isinstance(existing, dict):
+            payload.update(existing)
+    except FileNotFoundError:
+        payload = {}
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to read settings from %s: %s",
+            path,
+            exc,
+        )
+        payload = {}
+
+    eq_enabled = bool(getattr(app, "eq_enabled", False))
+    eq_selected_preset = getattr(app, "eq_selected_preset", None)
+    if isinstance(eq_selected_preset, str):
+        eq_selected_preset = eq_selected_preset.strip() or None
+    elif eq_selected_preset is not None:
+        eq_selected_preset = None
+    payload["eq_enabled"] = eq_enabled
+    payload["eq_selected_preset"] = eq_selected_preset
     try:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(

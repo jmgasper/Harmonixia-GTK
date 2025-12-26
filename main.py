@@ -3,6 +3,7 @@ import concurrent.futures
 import logging
 import os
 import sys
+import threading
 
 import gi
 
@@ -96,6 +97,7 @@ class MusicApp(Gtk.Application):
             "library_loading_label", "settings_button", "sidebar_now_playing_art", "sidebar_now_playing_art_url",
             "settings_server_entry", "settings_token_entry", "settings_status_label", "settings_connect_button",
             "settings_previous_view", "settings_output_backend_combo", "settings_pulse_device_entry", "settings_alsa_device_entry",
+            "eq_settings_card", "eq_preset_search_entry", "eq_graph_area", "eq_graph_placeholder", "settings_scrolled_window",
             "gtk_debug_status_label", "library_list", "home_nav_list", "playlists_list",
             "playlists_status_label", "playlists_add_button", "home_recently_played_list", "home_recently_added_list",
             "home_recently_played_status", "home_recently_added_status", "home_recently_played_refresh_id", "album_detail_view",
@@ -109,7 +111,7 @@ class MusicApp(Gtk.Application):
             "playback_timer_id", "playback_progress_bar", "playback_time_current_label", "playback_time_total_label",
             "now_playing_title_button", "now_playing_title_label", "now_playing_artist_button", "now_playing_artist_label",
             "play_pause_button", "play_pause_image", "playback_sync_id",
-            "previous_button", "next_button", "volume_slider", "volume_update_id",
+            "previous_button", "next_button", "volume_slider", "eq_button", "volume_update_id",
             "pending_volume_value", "output_menu_button", "output_popover", "output_targets_list", "sendspin_pipeline_teardown_id",
             "output_status_label", "output_label", "_last_sendspin_local_output_id", "output_manager",
             "search_entry", "search_results_view", "search_status_label", "search_playlists_section",
@@ -127,6 +129,12 @@ class MusicApp(Gtk.Application):
             "_resume_after_sendspin_connect", "search_loading", "search_active",
         ):
             setattr(self, name, False)
+        self.eq_enabled = False
+        self.eq_selected_preset = None
+        self.eq_preset_combo = None
+        self.eq_preset_search_entry = None
+        self.eq_toggle_switch = None
+        self.eq_details_view = None
         self.search_query = ""
         self.search_request_id = 0
         self.search_track_rows = []
@@ -191,8 +199,73 @@ class MusicApp(Gtk.Application):
             on_loading_state_changed=self.on_output_loading_changed,
         )
         self.load_settings()
+        self._apply_startup_eq_preset()
         self.client_session.set_server(self.server_url, self.auth_token)
         self.sendspin_manager.ensure_client_id()
+
+    def _apply_startup_eq_preset(self) -> None:
+        if not self.eq_selected_preset:
+            return
+        self._load_eq_preset_in_background(self.eq_selected_preset)
+
+    def _apply_eq_preset(self, preset: dict, preset_id: str) -> None:
+        try:
+            from music_assistant import eq_presets
+
+            eq_presets.apply_preset_to_pipeline(
+                preset,
+                self.audio_pipeline,
+            )
+            self.audio_pipeline.set_eq_enabled(self.eq_enabled)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to apply EQ preset %s: %s",
+                preset_id,
+                exc,
+            )
+
+    def _load_eq_preset_in_background(self, preset_id: str) -> None:
+        thread = threading.Thread(
+            target=self._load_eq_preset_worker,
+            args=(preset_id,),
+            daemon=True,
+        )
+        thread.start()
+
+    def _load_eq_preset_worker(self, preset_id: str) -> None:
+        try:
+            from music_assistant import eq_presets
+
+            presets = eq_presets.load_presets()
+            preset = eq_presets.get_preset_by_name(preset_id, presets)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to load EQ presets for %s: %s",
+                preset_id,
+                exc,
+            )
+            return
+        if not preset:
+            logging.getLogger(__name__).warning(
+                "EQ preset %s not found after loading presets.",
+                preset_id,
+            )
+            return
+        GLib.idle_add(
+            self._apply_eq_preset_from_worker,
+            preset_id,
+            preset,
+        )
+
+    def _apply_eq_preset_from_worker(
+        self,
+        preset_id: str,
+        preset: dict,
+    ) -> bool:
+        if self.eq_selected_preset != preset_id:
+            return False
+        self._apply_eq_preset(preset, preset_id)
+        return False
 
     def do_activate(self) -> None:
         if not self.window:
@@ -308,7 +381,8 @@ for binder, source, names in (
     (_bind_methods, app_helpers, ("configure_library_logging", "get_settings_path", "get_css_path", "get_cache_dir", "get_font_paths", "log_gtk_environment", "get_album_type_value")),
     (_bind_static_methods, app_helpers, ("write_json_log", "build_sample_albums", "normalize_album_type", "pick_album_value")),
     (_bind_static_methods, album_grid, ("pick_icon_name",)),
-    (_bind_methods, settings_manager, ("load_settings", "save_settings", "persist_sendspin_settings", "persist_output_selection", "update_settings_entries", "connect_to_server")),
+    (_bind_methods, settings_manager, ("load_settings", "save_settings", "persist_sendspin_settings", "persist_output_selection", "persist_eq_settings", "update_settings_entries", "connect_to_server")),
+    (_bind_methods, settings_panel, ("navigate_to_eq_settings",)),
     (_bind_methods, event_handlers, ("on_track_action_clicked", "on_track_selection_changed", "clear_track_selection", "on_play_pause_clicked", "on_previous_clicked", "on_next_clicked", "on_volume_changed", "_apply_volume_change", "on_volume_drag_begin", "on_volume_drag_end", "on_now_playing_title_clicked", "on_now_playing_artist_clicked", "on_now_playing_art_clicked")),
     (_bind_methods, output_handlers, ("on_output_popover_mapped", "on_output_target_activated", "on_outputs_changed", "_apply_outputs_changed", "on_output_selected", "_apply_output_selected", "on_output_loading_changed", "_apply_output_loading_changed", "on_local_output_selection_changed", "set_output_status", "on_sendspin_connected", "on_sendspin_disconnected", "on_sendspin_stream_start", "on_sendspin_stream_end", "on_sendspin_stream_clear", "on_sendspin_audio_chunk", "on_sendspin_volume_change", "on_sendspin_mute_change", "update_volume_slider", "set_sendspin_volume", "set_sendspin_muted", "set_output_volume", "_volume_command_worker", "cancel_sendspin_pipeline_teardown", "schedule_sendspin_pipeline_teardown", "_sendspin_pipeline_teardown")),
     (_bind_methods, album_operations, ("show_album_detail", "set_album_detail_status", "get_albums_scroll_position", "restore_album_scroll", "load_album_tracks", "_load_album_tracks_worker", "_fetch_album_tracks_async", "on_album_tracks_loaded", "populate_track_table", "on_album_detail_close", "on_album_play_clicked", "is_same_album")),

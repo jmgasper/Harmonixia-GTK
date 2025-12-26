@@ -1,6 +1,6 @@
 from gi.repository import Gtk, Pango
 
-from ui import output_selector
+from ui import output_selector, settings_panel
 
 
 def build_controls(app) -> Gtk.Widget:
@@ -127,6 +127,24 @@ def build_controls(app) -> Gtk.Widget:
     volume.add_controller(drag_gesture)
     app.volume_slider = volume
 
+    eq_icon_name = app.pick_icon_name(
+        [
+            "audio-equalizer-symbolic",
+            "media-eq-symbolic",
+            "multimedia-audio-player-symbolic",
+        ]
+    )
+    eq_button = Gtk.Button()
+    eq_button.add_css_class("flat")
+    eq_button.add_css_class("eq-button")
+    eq_button.set_tooltip_text("Equalizer Settings")
+    eq_button.set_child(Gtk.Image.new_from_icon_name(eq_icon_name))
+    eq_button.connect(
+        "clicked",
+        lambda _button: settings_panel.navigate_to_eq_settings(app),
+    )
+    app.eq_button = eq_button
+
     search = Gtk.SearchEntry()
     search.set_placeholder_text("Search Library")
     search.set_size_request(200, -1)
@@ -136,6 +154,7 @@ def build_controls(app) -> Gtk.Widget:
 
     search_and_volume.append(Gtk.Label(label="Volume"))
     search_and_volume.append(volume)
+    search_and_volume.append(eq_button)
     search_and_volume.append(Gtk.Separator.new(Gtk.Orientation.VERTICAL))
     search_and_volume.append(search)
 

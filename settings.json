@@ -1,9 +1,11 @@
 {
   "auth_token": "KS_J2xPAMQJTfC5eReQE0XGMTkHxQzgimE90ILu8D6ss9k34tYi3EUb8LejGRRog",
+  "eq_enabled": true,
+  "eq_selected_preset": "sennheiser:hd_600::autoeq_oratory1990",
   "output_alsa_device": "",
   "output_backend": "pulse",
   "output_local_output_id": "123",
-  "output_player_id": "ma_gtk_0b5bdfb857",
+  "output_player_id": "ma_gtk_f9d8ce39bd",
   "output_pulse_device": "",
   "server_url": "http://192.168.1.29:8095"
 }

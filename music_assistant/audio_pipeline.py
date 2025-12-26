@@ -26,6 +26,7 @@ class AudioPipeline:
         self.pipeline: Gst.Pipeline | None = None
         self.appsrc: Gst.Element | None = None
         self.volume_element: Gst.Element | None = None
+        self.eq_element: Gst.Element | None = None
         self.stream_format: PCMFormat | None = None
         self.stream_start_ts: int | None = None
         self.last_pts_ns: int | None = None
@@ -34,6 +35,9 @@ class AudioPipeline:
         self._bus_watch_id: int | None = None
         self.volume = 0.65
         self.muted = False
+        self.eq_enabled = False
+        self.eq_num_bands = 10
+        self.eq_band_configs: list[dict] = []
         self._logger = logging.getLogger(__name__)
 
     @staticmethod
@@ -90,6 +94,8 @@ class AudioPipeline:
             self._configure_queue(queue)
         audioconvert = Gst.ElementFactory.make("audioconvert", None)
         volume_element = Gst.ElementFactory.make("volume", None)
+        eq_element = Gst.ElementFactory.make("equalizer-nbands", None)
+        post_convert = None
         sink = sink_element
         supported_formats = list(self._get_supported_formats() or [])
         output_format = None
@@ -110,6 +116,8 @@ class AudioPipeline:
         capsfilter = None
         if output_format:
             capsfilter = Gst.ElementFactory.make("capsfilter", None)
+            if eq_element:
+                post_convert = Gst.ElementFactory.make("audioconvert", None)
         if not pipeline or not appsrc or not audioconvert or not sink:
             self._logger.warning(
                 "Failed to initialize GStreamer pipeline for Sendspin audio."
@@ -129,6 +137,14 @@ class AudioPipeline:
             self._logger.warning(
                 "Failed to initialize volume control for Sendspin audio."
             )
+        if eq_element is None:
+            self._logger.warning(
+                "Failed to initialize equalizer for Sendspin audio."
+            )
+        if output_format and eq_element and post_convert is None:
+            self._logger.warning(
+                "Failed to initialize post-EQ converter for Sendspin audio."
+            )
         caps = Gst.Caps.from_string(self.build_pcm_caps(format_info))
         appsrc.set_property("caps", caps)
         appsrc.set_property("format", Gst.Format.TIME)
@@ -141,6 +157,10 @@ class AudioPipeline:
         pipeline.add(audioconvert)
         if volume_element:
             pipeline.add(volume_element)
+        if eq_element:
+            pipeline.add(eq_element)
+        if post_convert:
+            pipeline.add(post_convert)
         if capsfilter:
             output_caps = Gst.Caps.from_string(
                 "audio/x-raw,"
@@ -161,6 +181,15 @@ class AudioPipeline:
         if volume_element:
             audioconvert.link(volume_element)
             link_element = volume_element
+            if eq_element:
+                volume_element.link(eq_element)
+                link_element = eq_element
+        elif eq_element:
+            audioconvert.link(eq_element)
+            link_element = eq_element
+        if post_convert:
+            link_element.link(post_convert)
+            link_element = post_convert
         tail_element = link_element
         if audioresample:
             pipeline.add(audioresample)
@@ -175,11 +204,12 @@ class AudioPipeline:
         self.pipeline = pipeline
         self.appsrc = appsrc
         self.volume_element = volume_element
+        self.eq_element = eq_element
         self.stream_format = format_info
         self.stream_start_ts = None
         self.last_pts_ns = None
         pipeline_message = (
-            "Sendspin pipeline ready: %s Hz/%s-bit/%s ch, sink=%s, resample=%s"
+            "Sendspin pipeline ready: %s Hz/%s-bit/%s ch, sink=%s, resample=%s, eq=%s"
         )
         pipeline_args = (
             format_info.sample_rate,
@@ -187,6 +217,7 @@ class AudioPipeline:
             format_info.channels,
             sink.get_factory().get_name() if sink and sink.get_factory() else "unknown",
             use_resample,
+            bool(eq_element),
         )
         if os.getenv("SENDSPIN_DEBUG"):
             if output_format:
@@ -201,6 +232,7 @@ class AudioPipeline:
             self._logger.debug(pipeline_message, *pipeline_args)
         self.set_volume(volume)
         self.set_muted(muted)
+        self._apply_eq_config()
 
     def destroy_pipeline(self) -> None:
         if not self.pipeline:
@@ -209,6 +241,7 @@ class AudioPipeline:
         self.pipeline = None
         self.appsrc = None
         self.volume_element = None
+        self.eq_element = None
         self.stream_format = None
         self.stream_start_ts = None
         self.last_pts_ns = None
@@ -395,3 +428,96 @@ class AudioPipeline:
             return
         self.volume_element.set_property("volume", self.volume)
         self.volume_element.set_property("mute", self.muted)
+
+    def configure_eq_bands(
+        self,
+        num_bands: int,
+        band_configs: list[dict],
+    ) -> None:
+        try:
+            num_bands = int(num_bands)
+        except (TypeError, ValueError):
+            self._logger.warning("Invalid EQ band count: %s", num_bands)
+            return
+        if num_bands < 1 or num_bands > 64:
+            self._logger.warning("EQ band count out of range: %s", num_bands)
+            num_bands = max(1, min(64, num_bands))
+        validated_configs: list[dict] = []
+        for config in band_configs or []:
+            if len(validated_configs) >= num_bands:
+                break
+            if not isinstance(config, dict):
+                self._logger.warning(
+                    "Invalid EQ band configuration: %s", config
+                )
+                continue
+            try:
+                freq = float(config.get("freq", 0.0))
+                bandwidth = float(config.get("bandwidth", 0.0))
+                gain = float(config.get("gain", 0.0))
+            except (TypeError, ValueError):
+                self._logger.warning(
+                    "Invalid EQ band configuration: %s", config
+                )
+                continue
+            if freq <= 0 or bandwidth <= 0:
+                self._logger.warning(
+                    "Invalid EQ band configuration: %s", config
+                )
+                continue
+            if gain < -24.0 or gain > 12.0:
+                self._logger.warning(
+                    "EQ band gain out of range: %s", gain
+                )
+                gain = max(-24.0, min(12.0, gain))
+            validated_configs.append(
+                {"freq": freq, "bandwidth": bandwidth, "gain": gain}
+            )
+        self.eq_num_bands = num_bands
+        self.eq_band_configs = validated_configs
+        if self.pipeline:
+            self._apply_eq_config()
+
+    def set_eq_enabled(self, enabled: bool) -> None:
+        self.eq_enabled = bool(enabled)
+        self._apply_eq_config()
+
+    def _apply_eq_config(self) -> None:
+        if not self.eq_element:
+            return
+        self.eq_element.set_property("num-bands", self.eq_num_bands)
+        if not self.eq_enabled:
+            for index in range(self.eq_num_bands):
+                band = self.eq_element.get_child_by_index(index)
+                if not band:
+                    continue
+                band.set_property("gain", 0.0)
+            self._logger.debug(
+                "EQ configured: enabled=%s, bands=%s",
+                self.eq_enabled,
+                self.eq_num_bands,
+            )
+            return
+        for index, config in enumerate(
+            self.eq_band_configs[: self.eq_num_bands]
+        ):
+            band = self.eq_element.get_child_by_index(index)
+            if not band:
+                continue
+            band.set_property("freq", config["freq"])
+            band.set_property("bandwidth", config["bandwidth"])
+            band.set_property("gain", config["gain"])
+        self._logger.debug(
+            "EQ configured: enabled=%s, bands=%s",
+            self.eq_enabled,
+            self.eq_num_bands,
+        )
+
+    def get_eq_state(self) -> dict:
+        return {
+            "enabled": self.eq_enabled,
+            "num_bands": self.eq_num_bands,
+            "band_configs": [
+                config.copy() for config in self.eq_band_configs
+            ],
+        }

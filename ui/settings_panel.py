@@ -1,7 +1,7 @@
-from gi.repository import Gtk
+from gi.repository import GLib, Gtk
 
 from constants import DEFAULT_SERVER_URL
-from ui import ui_utils
+from ui import eq_settings, ui_utils
 from utils import normalize_server_url
 
 
@@ -154,6 +154,10 @@ def build_settings_section(app) -> Gtk.Widget:
 
     settings_box.append(output_card)
 
+    eq_card = eq_settings.build_eq_section(app)
+    app.eq_settings_card = eq_card
+    settings_box.append(eq_card)
+
     gtk_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
     gtk_card.add_css_class("settings-card")
     gtk_header = Gtk.Label(label="GTK")
@@ -235,7 +239,16 @@ def build_settings_section(app) -> Gtk.Widget:
         lambda *_: on_output_settings_apply_clicked(app, output_apply_button),
     )
 
-    return settings_box
+    scrolled_window = Gtk.ScrolledWindow()
+    scrolled_window.set_policy(
+        Gtk.PolicyType.NEVER,
+        Gtk.PolicyType.AUTOMATIC,
+    )
+    scrolled_window.set_vexpand(True)
+    scrolled_window.set_child(settings_box)
+    app.settings_scrolled_window = scrolled_window
+
+    return scrolled_window
 
 
 def on_settings_clicked(app, _button: Gtk.Button) -> None:
@@ -244,6 +257,30 @@ def on_settings_clicked(app, _button: Gtk.Button) -> None:
         if current_view != "settings":
             app.settings_previous_view = current_view
         app.main_stack.set_visible_child_name("settings")
+
+
+def navigate_to_eq_settings(app) -> None:
+    on_settings_clicked(app, None)
+
+    def _scroll_to_eq() -> bool:
+        if not app.settings_scrolled_window or not app.eq_settings_card:
+            return False
+        vadjustment = app.settings_scrolled_window.get_vadjustment()
+        if not vadjustment:
+            return False
+        target_value = app.eq_settings_card.get_allocation().y - 50
+        max_value = max(
+            0.0,
+            vadjustment.get_upper() - vadjustment.get_page_size(),
+        )
+        if target_value < 0:
+            target_value = 0.0
+        elif target_value > max_value:
+            target_value = max_value
+        vadjustment.set_value(target_value)
+        return False
+
+    GLib.idle_add(_scroll_to_eq)
 
 
 def on_settings_back_clicked(app, _button: Gtk.Button) -> None:
