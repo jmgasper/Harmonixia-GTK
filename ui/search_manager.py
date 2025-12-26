@@ -2,7 +2,7 @@ import threading
 
 from gi.repository import GLib, Gtk
 
-from constants import HOME_ALBUM_ART_SIZE, SEARCH_DEBOUNCE_MS, SEARCH_RESULT_LIMIT
+from constants import MEDIA_TILE_SIZE, SEARCH_DEBOUNCE_MS, SEARCH_RESULT_LIMIT
 from music_assistant import library
 from music_assistant_client import MusicAssistantClient
 from music_assistant_client.exceptions import (
@@ -305,7 +305,7 @@ def populate_search_playlists(app, playlists: list[dict]) -> None:
             app,
             name,
             image_url,
-            art_size=HOME_ALBUM_ART_SIZE,
+            art_size=MEDIA_TILE_SIZE,
         )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
@@ -313,7 +313,7 @@ def populate_search_playlists(app, playlists: list[dict]) -> None:
         child.set_valign(Gtk.Align.START)
         child.set_hexpand(False)
         child.set_vexpand(False)
-        child.set_size_request(HOME_ALBUM_ART_SIZE, -1)
+        child.set_size_request(MEDIA_TILE_SIZE, -1)
         child.playlist_data = playlist
         app.search_playlists_flow.append(child)
     app.search_playlists_section.set_visible(bool(playlists))
@@ -339,7 +339,7 @@ def populate_search_albums(app, albums: list[dict]) -> None:
             title,
             artist_label,
             image_url,
-            art_size=HOME_ALBUM_ART_SIZE,
+            art_size=MEDIA_TILE_SIZE,
         )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
@@ -347,7 +347,7 @@ def populate_search_albums(app, albums: list[dict]) -> None:
         child.set_valign(Gtk.Align.START)
         child.set_hexpand(False)
         child.set_vexpand(False)
-        child.set_size_request(HOME_ALBUM_ART_SIZE, -1)
+        child.set_size_request(MEDIA_TILE_SIZE, -1)
         child.album_data = album_data
         app.search_albums_flow.append(child)
     app.search_albums_section.set_visible(bool(albums))

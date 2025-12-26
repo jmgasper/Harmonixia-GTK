@@ -1,5 +1,6 @@
 from gi.repository import Gtk
 
+from constants import MEDIA_TILE_SIZE
 from ui import ui_utils
 from ui.widgets import album_card
 
@@ -45,7 +46,7 @@ def build_home_album_list(
     title: str, empty_message: str
 ) -> tuple[Gtk.Widget, Gtk.FlowBox, Gtk.Label]:
     section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    section.add_css_class("home-card")
+    section.add_css_class("search-group")
 
     header = Gtk.Label(label=title)
     header.add_css_class("section-title")
@@ -53,18 +54,7 @@ def build_home_album_list(
     section.append(header)
 
     flow = Gtk.FlowBox()
-    flow.add_css_class("home-grid")
-    flow.set_homogeneous(True)
-    flow.set_min_children_per_line(3)
-    flow.set_max_children_per_line(3)
-    flow.set_selection_mode(Gtk.SelectionMode.NONE)
-    flow.set_halign(Gtk.Align.FILL)
-    flow.set_valign(Gtk.Align.START)
-    flow.set_hexpand(True)
-    flow.set_vexpand(False)
-    flow.set_column_spacing(12)
-    flow.set_row_spacing(12)
-    flow.set_activate_on_single_click(True)
+    ui_utils.configure_media_flowbox(flow, Gtk.SelectionMode.NONE)
     flow.connect(
         "child-activated",
         lambda flowbox, child: on_home_album_activated(
@@ -112,7 +102,7 @@ def populate_home_album_list(app, listbox: Gtk.FlowBox | None, albums: list) -> 
         child.set_valign(Gtk.Align.START)
         child.set_hexpand(False)
         child.set_vexpand(False)
-        child.set_size_request(album_card.HOME_ALBUM_ART_SIZE, -1)
+        child.set_size_request(MEDIA_TILE_SIZE, -1)
         child.album_data = album
         listbox.append(child)
 

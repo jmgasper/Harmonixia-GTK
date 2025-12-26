@@ -66,6 +66,31 @@ def clear_container(container: Gtk.Widget) -> None:
         child = container.get_first_child()
 
 
+def configure_media_flowbox(
+    flow: Gtk.FlowBox,
+    selection_mode: Gtk.SelectionMode,
+    *,
+    min_children_per_line: int = 2,
+    max_children_per_line: int = 6,
+    column_spacing: int = 16,
+    row_spacing: int = 16,
+    css_class: str | None = "search-grid",
+) -> None:
+    if css_class:
+        flow.add_css_class(css_class)
+    flow.set_homogeneous(True)
+    flow.set_min_children_per_line(min_children_per_line)
+    flow.set_max_children_per_line(max_children_per_line)
+    flow.set_selection_mode(selection_mode)
+    flow.set_activate_on_single_click(True)
+    flow.set_halign(Gtk.Align.FILL)
+    flow.set_valign(Gtk.Align.START)
+    flow.set_hexpand(True)
+    flow.set_vexpand(False)
+    flow.set_column_spacing(column_spacing)
+    flow.set_row_spacing(row_spacing)
+
+
 def format_artist_names(artists: list) -> str:
     names = []
     for artist in artists:

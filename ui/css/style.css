@@ -380,6 +380,11 @@ progressbar progress {
   padding: 0 0 8px;
 }
 
+.search-group .status-label {
+  color: #6b7280;
+  padding: 4px 0 0;
+}
+
 .search-grid {
   background-color: transparent;
 }
@@ -605,20 +610,21 @@ popover.output-popover > contents {
 }
 
 .artist-back {
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
+  background-color: #e2e8f0;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 6px 10px;
-  color: #1f2937;
+  color: #0f172a;
 }
 
 .artist-back label,
 .artist-back image {
-  color: #1f2937;
+  color: #0f172a;
+  font-weight: 600;
 }
 
 .artist-back:hover {
-  background-color: #f1f5f9;
+  background-color: #dbe2ea;
 }
 
 .detail-art {

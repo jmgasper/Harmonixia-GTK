@@ -10,6 +10,19 @@ Mainly built with help from ChatGPT Codex.
 - Playback controls with queue support
 - MPRIS integration for media keys
 - Sendspin streaming for Music Assistant audio
+- EQ presets from Roon Opra
+
+## Screenshots
+
+![home](./screenshots/home.png)
+
+![album_list](./screenshots/album_list.png)
+
+![search_results](./screenshots/search_results.png)
+
+![settings](./screenshots/settings_panel.png)
+
+![album](./screenshots/album.png)
 
 ## Dependencies
 

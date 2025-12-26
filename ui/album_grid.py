@@ -6,14 +6,19 @@ from gi.repository import Gdk, Gtk
 
 from music_assistant_models.enums import AlbumType
 
-from constants import ALBUM_TILE_SIZE
+from constants import MEDIA_TILE_SIZE
 from ui import image_loader, ui_utils
 from ui.widgets import album_card, loading_spinner
 
 
 def build_album_section(app) -> Gtk.Widget:
-    albums_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-    albums_box.add_css_class("album-section")
+    content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    content.add_css_class("search-section-content")
+    content.set_hexpand(True)
+    content.set_vexpand(True)
+
+    section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    section.add_css_class("search-group")
 
     header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     header_row.add_css_class("album-header")
@@ -30,37 +35,33 @@ def build_album_section(app) -> Gtk.Widget:
     filter_button = build_album_type_filter_button(app)
     header_row.append(filter_button)
 
-    albums_box.append(header_row)
+    section.append(header_row)
 
     status = Gtk.Label(
         label="Configure your Music Assistant server in Settings to load your library."
     )
     status.add_css_class("status-label")
     status.set_xalign(0)
+    status.set_wrap(True)
     app.library_status_label = status
-    albums_box.append(status)
+    section.append(status)
 
     flow = Gtk.FlowBox()
-    flow.set_homogeneous(True)
-    flow.set_max_children_per_line(20)
-    flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
-    flow.set_halign(Gtk.Align.FILL)
-    flow.set_valign(Gtk.Align.START)
-    flow.set_hexpand(True)
-    flow.set_vexpand(False)
-    flow.set_column_spacing(16)
-    flow.set_row_spacing(16)
-    flow.set_activate_on_single_click(True)
+    ui_utils.configure_media_flowbox(flow, Gtk.SelectionMode.SINGLE)
     flow.connect(
         "child-activated",
         lambda flowbox, child: on_album_activated(app, flowbox, child),
     )
     app.albums_flow = flow
     set_album_items(app, [])
+    section.append(flow)
+
+    content.append(section)
 
     scroller = Gtk.ScrolledWindow()
+    scroller.add_css_class("search-section")
     scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-    scroller.set_child(flow)
+    scroller.set_child(content)
     scroller.set_vexpand(True)
     app.albums_scroller = scroller
 
@@ -76,8 +77,7 @@ def build_album_section(app) -> Gtk.Widget:
     app.library_loading_spinner = spinner
     app.library_loading_label = loading_label
 
-    albums_box.append(overlay)
-    return albums_box
+    return overlay
 
 
 def build_album_type_filter_button(app) -> Gtk.Widget:
@@ -232,13 +232,19 @@ def populate_album_flow(app, albums: list) -> None:
                 "is_sample": True,
                 "album_type": AlbumType.ALBUM.value,
             }
-        card = album_card.make_album_card(app, title, artist, image_url)
+        card = album_card.make_album_card(
+            app,
+            title,
+            artist,
+            image_url,
+            art_size=MEDIA_TILE_SIZE,
+        )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
         child.set_halign(Gtk.Align.CENTER)
         child.set_valign(Gtk.Align.START)
         child.set_hexpand(False)
         child.set_vexpand(False)
-        child.set_size_request(ALBUM_TILE_SIZE, -1)
+        child.set_size_request(MEDIA_TILE_SIZE, -1)
         child.album_data = album_data
         app.albums_flow.append(child)

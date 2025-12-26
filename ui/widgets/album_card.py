@@ -1,6 +1,6 @@
 from gi.repository import Gtk, Pango
 
-from constants import ALBUM_TILE_SIZE, HOME_ALBUM_ART_SIZE
+from constants import MEDIA_TILE_SIZE
 from ui import image_loader, ui_utils
 
 
@@ -9,7 +9,7 @@ def make_album_card(
     title: str,
     artist: str,
     image_url: str | None = None,
-    art_size: int = ALBUM_TILE_SIZE,
+    art_size: int = MEDIA_TILE_SIZE,
     card_class: str | None = None,
     show_artist: bool = True,
 ) -> Gtk.Widget:
@@ -70,8 +70,7 @@ def make_home_album_card(app, album: dict) -> Gtk.Widget:
         title,
         artist_label,
         image_url,
-        art_size=HOME_ALBUM_ART_SIZE,
-        card_class="home-album-card",
+        art_size=MEDIA_TILE_SIZE,
     )
 
 
@@ -79,7 +78,7 @@ def make_playlist_card(
     app,
     title: str,
     image_url: str | None = None,
-    art_size: int = HOME_ALBUM_ART_SIZE,
+    art_size: int = MEDIA_TILE_SIZE,
 ) -> Gtk.Widget:
     return make_album_card(
         app,

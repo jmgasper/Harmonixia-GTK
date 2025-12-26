@@ -1,6 +1,6 @@
 from gi.repository import Gtk
 
-from constants import HOME_ALBUM_ART_SIZE
+from constants import MEDIA_TILE_SIZE
 from ui import image_loader, ui_utils
 from ui.widgets import album_card
 
@@ -98,7 +98,7 @@ def populate_artist_album_flow(app, albums: list[dict]) -> None:
             title,
             artist_label,
             image_url,
-            art_size=HOME_ALBUM_ART_SIZE,
+            art_size=MEDIA_TILE_SIZE,
         )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
@@ -106,7 +106,7 @@ def populate_artist_album_flow(app, albums: list[dict]) -> None:
         child.set_valign(Gtk.Align.START)
         child.set_hexpand(False)
         child.set_vexpand(False)
-        child.set_size_request(HOME_ALBUM_ART_SIZE, -1)
+        child.set_size_request(MEDIA_TILE_SIZE, -1)
         child.album_data = album
         app.artist_albums_flow.append(child)
 

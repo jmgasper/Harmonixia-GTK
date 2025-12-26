@@ -1,5 +1,7 @@
 from gi.repository import Gtk
 
+from ui import ui_utils
+
 
 def build_artist_albums_section(app) -> Gtk.Widget:
     container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -40,18 +42,7 @@ def build_artist_albums_section(app) -> Gtk.Widget:
     albums_section.append(albums_header)
 
     flow = Gtk.FlowBox()
-    flow.add_css_class("search-grid")
-    flow.set_homogeneous(True)
-    flow.set_min_children_per_line(2)
-    flow.set_max_children_per_line(6)
-    flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
-    flow.set_activate_on_single_click(True)
-    flow.set_halign(Gtk.Align.FILL)
-    flow.set_valign(Gtk.Align.START)
-    flow.set_hexpand(True)
-    flow.set_vexpand(False)
-    flow.set_column_spacing(16)
-    flow.set_row_spacing(16)
+    ui_utils.configure_media_flowbox(flow, Gtk.SelectionMode.SINGLE)
     flow.connect("child-activated", app.on_artist_album_activated)
     albums_section.append(flow)
 

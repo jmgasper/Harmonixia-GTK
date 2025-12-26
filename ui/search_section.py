@@ -1,6 +1,6 @@
 from gi.repository import Gtk
 
-from ui import track_table
+from ui import track_table, ui_utils
 
 
 def build_search_section(app) -> Gtk.Widget:
@@ -61,18 +61,7 @@ def build_flow_section(title: str) -> tuple[Gtk.Box, Gtk.FlowBox]:
     section.append(header)
 
     flow = Gtk.FlowBox()
-    flow.add_css_class("search-grid")
-    flow.set_homogeneous(True)
-    flow.set_min_children_per_line(2)
-    flow.set_max_children_per_line(6)
-    flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
-    flow.set_activate_on_single_click(True)
-    flow.set_halign(Gtk.Align.FILL)
-    flow.set_valign(Gtk.Align.START)
-    flow.set_hexpand(True)
-    flow.set_vexpand(False)
-    flow.set_column_spacing(16)
-    flow.set_row_spacing(16)
+    ui_utils.configure_media_flowbox(flow, Gtk.SelectionMode.SINGLE)
     section.append(flow)
 
     section.set_visible(False)

@@ -5,7 +5,7 @@
   "output_alsa_device": "",
   "output_backend": "pulse",
   "output_local_output_id": "123",
-  "output_player_id": "ma_gtk_f9d8ce39bd",
+  "output_player_id": "ma_gtk_4afdfe0555",
   "output_pulse_device": "",
   "server_url": "http://192.168.1.29:8095"
 }
