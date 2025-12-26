@@ -1,4 +1,4 @@
-# Music Assistant GTK Client
+# Harmonixia:  Music Assistant GTK Client
 
 A GTK 4 desktop client for Music Assistant that focuses on fast library browsing, reliable playback, and seamless desktop media integration.
 
