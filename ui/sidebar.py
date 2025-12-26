@@ -114,6 +114,9 @@ def build_sidebar(app) -> Gtk.Widget:
         now_playing_art.set_content_fit(Gtk.ContentFit.COVER)
     elif hasattr(now_playing_art, "set_keep_aspect_ratio"):
         now_playing_art.set_keep_aspect_ratio(True)
+    click_gesture = Gtk.GestureClick.new()
+    click_gesture.connect("released", app.on_now_playing_art_clicked)
+    now_playing_art.add_controller(click_gesture)
     app.sidebar_now_playing_art = now_playing_art
 
     settings_button = Gtk.Button()

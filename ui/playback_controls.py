@@ -46,12 +46,30 @@ def build_controls(app) -> Gtk.Widget:
     title.set_xalign(0)
     title.set_ellipsize(Pango.EllipsizeMode.END)
     title.set_single_line_mode(True)
+    title.set_hexpand(True)
+
+    title_button = Gtk.Button()
+    title_button.add_css_class("now-playing-link")
+    title_button.set_has_frame(False)
+    title_button.set_hexpand(True)
+    title_button.set_halign(Gtk.Align.FILL)
+    title_button.set_child(title)
+    title_button.connect("clicked", app.on_now_playing_title_clicked)
 
     artist = Gtk.Label(label="")
     artist.add_css_class("now-playing-artist")
     artist.set_xalign(0)
     artist.set_ellipsize(Pango.EllipsizeMode.END)
     artist.set_single_line_mode(True)
+    artist.set_hexpand(True)
+
+    artist_button = Gtk.Button()
+    artist_button.add_css_class("now-playing-link")
+    artist_button.set_has_frame(False)
+    artist_button.set_hexpand(True)
+    artist_button.set_halign(Gtk.Align.FILL)
+    artist_button.set_child(artist)
+    artist_button.connect("clicked", app.on_now_playing_artist_clicked)
 
     progress_row = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -77,15 +95,17 @@ def build_controls(app) -> Gtk.Widget:
     progress_row.append(progress)
     progress_row.append(time_total)
 
-    now_playing.append(title)
-    now_playing.append(artist)
+    now_playing.append(title_button)
+    now_playing.append(artist_button)
     now_playing.append(progress_row)
 
     app.previous_button = previous_button
     app.play_pause_button = play_pause_button
     app.play_pause_image = play_pause_image
     app.next_button = next_button
+    app.now_playing_title_button = title_button
     app.now_playing_title_label = title
+    app.now_playing_artist_button = artist_button
     app.now_playing_artist_label = artist
     app.playback_progress_bar = progress
     app.playback_time_current_label = time_current
@@ -110,6 +130,9 @@ def build_controls(app) -> Gtk.Widget:
     search = Gtk.SearchEntry()
     search.set_placeholder_text("Search Library")
     search.set_size_request(200, -1)
+    search.connect("search-changed", app.on_search_changed)
+    search.connect("activate", app.on_search_activated)
+    app.search_entry = search
 
     search_and_volume.append(Gtk.Label(label="Volume"))
     search_and_volume.append(volume)

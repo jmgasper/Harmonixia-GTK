@@ -123,7 +123,7 @@ def get_gtk_environment_info() -> tuple[str, str]:
     return version, theme_name
 
 
-def make_artist_row(name: str) -> Gtk.ListBoxRow:
+def make_artist_row(name: str, artist_data: object | None = None) -> Gtk.ListBoxRow:
     row = Gtk.ListBoxRow()
     row.add_css_class("artist-row")
 
@@ -132,4 +132,5 @@ def make_artist_row(name: str) -> Gtk.ListBoxRow:
     label.set_margin_top(2)
     label.set_margin_bottom(2)
     row.set_child(label)
+    row.artist_data = artist_data if artist_data is not None else name
     return row

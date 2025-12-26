@@ -277,6 +277,14 @@ def on_album_detail_close(app, _button: Gtk.Button) -> None:
         app.album_detail_background.set_paintable(None)
     if target_view == "home":
         app.clear_home_album_selection()
+    elif target_view == "search":
+        if app.search_albums_flow:
+            app.search_albums_flow.unselect_all()
+        if app.search_playlists_flow:
+            app.search_playlists_flow.unselect_all()
+    elif target_view == "artist-albums":
+        if app.artist_albums_flow:
+            app.artist_albums_flow.unselect_all()
     elif target_view == "albums":
         GLib.idle_add(app.restore_album_scroll)
 

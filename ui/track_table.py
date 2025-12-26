@@ -281,6 +281,7 @@ def on_track_actions_setup(
 ) -> None:
     menu_button = Gtk.MenuButton()
     menu_button.add_css_class("track-action-button")
+    menu_button.set_has_frame(False)
     menu_button.set_child(Gtk.Image.new_from_icon_name("open-menu-symbolic"))
 
     popover = Gtk.Popover()

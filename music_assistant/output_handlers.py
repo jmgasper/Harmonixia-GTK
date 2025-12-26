@@ -95,6 +95,7 @@ def _apply_output_loading_changed(app) -> None:
 def on_local_output_selection_changed(app) -> None:
     if not app.sendspin_manager.has_support():
         return
+    app.cancel_sendspin_pipeline_teardown()
     if app.playback_state == PlaybackState.PLAYING and app.playback_track_info:
         app._resume_after_sendspin_connect = True
         if os.getenv("SENDSPIN_DEBUG"):
@@ -135,7 +136,36 @@ def on_sendspin_disconnected(app) -> None:
     return
 
 
+def cancel_sendspin_pipeline_teardown(app) -> None:
+    teardown_id = app.sendspin_pipeline_teardown_id
+    if teardown_id is None:
+        return
+    try:
+        GLib.source_remove(teardown_id)
+    except Exception:
+        pass
+    app.sendspin_pipeline_teardown_id = None
+
+
+def schedule_sendspin_pipeline_teardown(
+    app, delay_ms: int = 2000
+) -> None:
+    app.cancel_sendspin_pipeline_teardown()
+    app.sendspin_pipeline_teardown_id = GLib.timeout_add(
+        delay_ms,
+        app._sendspin_pipeline_teardown,
+    )
+
+
+def _sendspin_pipeline_teardown(app) -> bool:
+    app.sendspin_pipeline_teardown_id = None
+    app.audio_pipeline.destroy_pipeline()
+    _apply_sendspin_stream_end(app)
+    return False
+
+
 def on_sendspin_stream_start(app, format_info: sendspin.PCMFormat) -> None:
+    app.cancel_sendspin_pipeline_teardown()
     sink = None
     local_output = app.output_manager.get_preferred_local_output()
     if local_output:
@@ -149,7 +179,19 @@ def on_sendspin_stream_start(app, format_info: sendspin.PCMFormat) -> None:
 
 
 def on_sendspin_stream_end(app) -> None:
-    app.audio_pipeline.destroy_pipeline()
+    app.audio_pipeline.flush()
+    app.schedule_sendspin_pipeline_teardown()
+
+
+def _apply_sendspin_stream_end(app) -> bool:
+    if getattr(app, "_resume_after_sendspin_connect", False):
+        return False
+    if getattr(app.sendspin_manager, "stream_active", False):
+        return False
+    if app.playback_state == PlaybackState.PAUSED:
+        return False
+    app.stop_playback()
+    return False
 
 
 def on_sendspin_stream_clear(app) -> None:
@@ -159,6 +201,7 @@ def on_sendspin_stream_clear(app) -> None:
 def on_sendspin_audio_chunk(
     app, timestamp_us: int, payload: bytes, format_info: sendspin.PCMFormat
 ) -> None:
+    app.cancel_sendspin_pipeline_teardown()
     if not app.audio_pipeline.is_active():
         sink = None
         local_output = app.output_manager.get_preferred_local_output()

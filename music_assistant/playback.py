@@ -162,6 +162,17 @@ async def _playback_command_async(
         await client.player_queues.seek(queue_id, position)
 
 
+async def _play_index_async(
+    client: MusicAssistantClient,
+    index: int,
+    preferred_player_id: str | None,
+) -> None:
+    _player_id, queue_id = await resolve_player_and_queue(
+        client, preferred_player_id
+    )
+    await client.player_queues.play_index(queue_id, int(index))
+
+
 def send_playback_command(
     client_session,
     server_url: str,
@@ -177,6 +188,22 @@ def send_playback_command(
         command,
         preferred_player_id,
         position,
+    )
+
+
+def play_index(
+    client_session,
+    server_url: str,
+    auth_token: str,
+    index: int,
+    preferred_player_id: str | None,
+) -> None:
+    client_session.run(
+        server_url,
+        auth_token,
+        _play_index_async,
+        index,
+        preferred_player_id,
     )
 
 
@@ -206,6 +233,7 @@ def set_player_volume(
 
 __all__ = [
     "play_album",
+    "play_index",
     "send_playback_command",
     "set_player_volume",
     "resolve_player_and_queue",

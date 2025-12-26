@@ -11,6 +11,7 @@ def make_album_card(
     image_url: str | None = None,
     art_size: int = ALBUM_TILE_SIZE,
     card_class: str | None = None,
+    show_artist: bool = True,
 ) -> Gtk.Widget:
     card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
     card.add_css_class("album-card")
@@ -48,15 +49,15 @@ def make_album_card(
     album_title.set_justify(Gtk.Justification.CENTER)
     album_title.set_max_width_chars(24)
 
-    album_artist = Gtk.Label(label=artist, xalign=0.5)
-    album_artist.add_css_class("album-artist")
-    album_artist.set_ellipsize(Pango.EllipsizeMode.END)
-    album_artist.set_justify(Gtk.Justification.CENTER)
-    album_artist.set_max_width_chars(24)
-
     card.append(art)
     card.append(album_title)
-    card.append(album_artist)
+    if show_artist:
+        album_artist = Gtk.Label(label=artist, xalign=0.5)
+        album_artist.add_css_class("album-artist")
+        album_artist.set_ellipsize(Pango.EllipsizeMode.END)
+        album_artist.set_justify(Gtk.Justification.CENTER)
+        album_artist.set_max_width_chars(24)
+        card.append(album_artist)
     return card
 
 
@@ -71,4 +72,21 @@ def make_home_album_card(app, album: dict) -> Gtk.Widget:
         image_url,
         art_size=HOME_ALBUM_ART_SIZE,
         card_class="home-album-card",
+    )
+
+
+def make_playlist_card(
+    app,
+    title: str,
+    image_url: str | None = None,
+    art_size: int = HOME_ALBUM_ART_SIZE,
+) -> Gtk.Widget:
+    return make_album_card(
+        app,
+        title,
+        "",
+        image_url,
+        art_size=art_size,
+        card_class="playlist-card",
+        show_artist=False,
     )

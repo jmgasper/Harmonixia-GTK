@@ -57,7 +57,7 @@ def build_home_album_list(
     flow.set_homogeneous(True)
     flow.set_min_children_per_line(3)
     flow.set_max_children_per_line(3)
-    flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    flow.set_selection_mode(Gtk.SelectionMode.NONE)
     flow.set_halign(Gtk.Align.FILL)
     flow.set_valign(Gtk.Align.START)
     flow.set_hexpand(True)

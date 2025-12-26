@@ -123,6 +123,8 @@ def on_library_loaded(
 
     if app.artists_header:
         app.artists_header.set_label(f"Artists ({len(artists)})")
+    if app.current_artist:
+        app.refresh_artist_albums()
     app.refresh_output_targets()
 
 
@@ -176,7 +178,7 @@ def populate_artists_list(app, artists: list) -> None:
             name = artist.get("name") or "Unknown Artist"
         else:
             name = str(artist)
-        app.artists_list.append(ui_utils.make_artist_row(name))
+        app.artists_list.append(ui_utils.make_artist_row(name, artist))
 
 
 def build_artists_section(app) -> Gtk.Widget:
@@ -191,8 +193,11 @@ def build_artists_section(app) -> Gtk.Widget:
     artists_box.append(header)
 
     artists_list = Gtk.ListBox()
-    artists_list.set_selection_mode(Gtk.SelectionMode.NONE)
+    artists_list.add_css_class("artist-list")
+    artists_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
     artists_list.set_show_separators(True)
+    artists_list.set_activate_on_single_click(True)
+    artists_list.connect("row-activated", app.on_artist_row_activated)
     app.artists_list = artists_list
     from ui import ui_utils
 

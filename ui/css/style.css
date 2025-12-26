@@ -69,6 +69,28 @@ separator {
   font-weight: 500;
 }
 
+.control-bar button.now-playing-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  min-height: 0;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.control-bar button.now-playing-link:hover label {
+  text-decoration: underline;
+}
+
+.control-bar button.now-playing-link:disabled {
+  cursor: default;
+}
+
+.control-bar button.now-playing-link:disabled label {
+  text-decoration: none;
+  opacity: 0.7;
+}
+
 .control-bar .now-playing-time {
   color: #cbd5e1;
   font-size: 11px;
@@ -173,6 +195,15 @@ scale slider {
   background-color: #1b212b;
   border: 1px solid #2a303a;
   border-radius: 8px;
+  cursor: pointer;
+}
+
+.sidebar-now-playing-art:hover {
+  border-color: #3a4454;
+}
+
+.sidebar-now-playing-art:active {
+  border-color: #4a90e2;
 }
 
 .section-title {
@@ -302,6 +333,60 @@ progressbar progress {
 
 .album-section .status-label {
   color: #6b7280;
+}
+
+.search-section {
+  background-color: #fbfbfb;
+}
+
+.search-section viewport {
+  background-color: #fbfbfb;
+}
+
+.search-section-content {
+  padding: 12px 16px 18px;
+}
+
+.search-section-content .status-label {
+  color: #6b7280;
+  padding: 0 4px;
+}
+
+.search-group {
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.search-group .section-title {
+  color: #1f2937;
+  padding: 0 0 8px;
+}
+
+.search-grid {
+  background-color: transparent;
+}
+
+.search-grid flowboxchild {
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.search-grid flowboxchild:hover {
+  background-color: #f1f5f9;
+}
+
+.search-group .artist-row label {
+  color: #1f2937;
+}
+
+.search-group .artist-row:hover {
+  background-color: rgba(226, 232, 240, 0.9);
+}
+
+.search-group .artist-row:selected {
+  background-color: rgba(219, 234, 254, 0.95);
 }
 
 .playlist-detail {
@@ -503,6 +588,23 @@ popover.output-popover > contents {
   background-color: rgba(15, 23, 42, 0.55);
 }
 
+.artist-back {
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #1f2937;
+}
+
+.artist-back label,
+.artist-back image {
+  color: #1f2937;
+}
+
+.artist-back:hover {
+  background-color: #f1f5f9;
+}
+
 .detail-art {
   background-color: #ffffff;
   border-radius: 6px;
@@ -624,16 +726,56 @@ columnview.track-table listview listitem:hover {
   color: #16a34a;
 }
 
+.artist-list {
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 8px;
+}
+
+.artist-list row {
+  background-color: transparent;
+}
+
+.artist-list row:nth-child(even) {
+  background-color: rgba(248, 250, 252, 0.9);
+}
+
+.artist-list row:selected {
+  background-color: rgba(219, 234, 254, 0.95);
+}
+
+.artist-list row:selected label {
+  color: #0f172a;
+}
+
+.artist-list separator {
+  background-color: transparent;
+  min-height: 0;
+  border: 0;
+}
+
 .track-action-button {
-  background: transparent;
-  border: 1px solid transparent;
+  background-color: #f1f5f9;
+  background-image: none;
+  border: 1px solid #d1d5db;
   border-radius: 6px;
-  padding: 1px;
+  box-shadow: none;
+  color: #64748b;
+  padding: 2px;
+}
+
+.track-action-button image {
+  color: #64748b;
 }
 
 .track-action-button:hover {
-  background-color: #eef2f7;
-  border-color: #d1d5db;
+  background-color: #e2e8f0;
+  border-color: #cbd5e1;
+}
+
+.track-action-button:active {
+  background-color: #cbd5e1;
+  border-color: #94a3b8;
 }
 
 popover.track-action-popover {
@@ -706,10 +848,18 @@ popover.track-action-popover > contents {
   padding: 6px 8px;
 }
 
+.artist-row label {
+  color: #111827;
+}
+
 .artist-row:hover {
-  background-color: #1f2530;
+  background-color: rgba(226, 232, 240, 0.9);
 }
 
 .artist-row:selected {
-  background-color: #2b3442;
+  background-color: rgba(219, 234, 254, 0.95);
+}
+
+.artist-row:selected label {
+  color: #0f172a;
 }

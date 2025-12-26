@@ -13,6 +13,20 @@ def build_settings_section(app) -> Gtk.Widget:
     settings_box.set_margin_start(16)
     settings_box.set_margin_end(16)
 
+    top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    top_bar.set_halign(Gtk.Align.START)
+    back_button = Gtk.Button()
+    back_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    back_content.append(Gtk.Image.new_from_icon_name("go-previous-symbolic"))
+    back_content.append(Gtk.Label(label="Back"))
+    back_button.set_child(back_content)
+    back_button.connect(
+        "clicked",
+        lambda button: on_settings_back_clicked(app, button),
+    )
+    top_bar.append(back_button)
+    settings_box.append(top_bar)
+
     header = Gtk.Label(label="Settings")
     header.add_css_class("section-title")
     header.set_xalign(0)
@@ -226,7 +240,17 @@ def build_settings_section(app) -> Gtk.Widget:
 
 def on_settings_clicked(app, _button: Gtk.Button) -> None:
     if app.main_stack:
+        current_view = app.main_stack.get_visible_child_name()
+        if current_view != "settings":
+            app.settings_previous_view = current_view
         app.main_stack.set_visible_child_name("settings")
+
+
+def on_settings_back_clicked(app, _button: Gtk.Button) -> None:
+    target_view = app.settings_previous_view or "home"
+    if app.main_stack:
+        app.main_stack.set_visible_child_name(target_view)
+    app.settings_previous_view = None
 
 
 def on_settings_connect_clicked(app, _button: Gtk.Button) -> None:

@@ -2,6 +2,8 @@
 
 A GTK 4 desktop client for Music Assistant that focuses on fast library browsing, reliable playback, and seamless desktop media integration.
 
+Mainly built with help from ChatGPT Codex.
+
 ## Features
 
 - Album browsing with grid and detail views

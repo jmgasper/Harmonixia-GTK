@@ -216,12 +216,20 @@ class AudioPipeline:
         self._detach_bus_watch()
 
     def flush(self) -> None:
-        if self.appsrc is None:
+        if self.appsrc is None or Gst is None:
             return
         self.stream_start_ts = None
         self.last_pts_ns = None
-        self.appsrc.emit("flush-start")
-        self.appsrc.emit("flush-stop", True)
+        pipeline = self.pipeline
+        try:
+            if pipeline:
+                pipeline.send_event(Gst.Event.new_flush_start())
+                pipeline.send_event(Gst.Event.new_flush_stop(True))
+                return
+            self.appsrc.send_event(Gst.Event.new_flush_start())
+            self.appsrc.send_event(Gst.Event.new_flush_stop(True))
+        except Exception:
+            self._logger.debug("Flush events failed.", exc_info=True)
 
     def push_audio(
         self,
