@@ -1,4 +1,4 @@
-# Music Assistant GTK Client
+# Harmonixia:  Music Assistant GTK Client
 
 ![logo](./screenshots/Logo.png)
 
