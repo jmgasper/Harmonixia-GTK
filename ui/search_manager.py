@@ -45,6 +45,20 @@ def on_search_activated(app, entry: Gtk.SearchEntry) -> None:
     app._start_search(query)
 
 
+def on_search_scope_toggled(app, button: Gtk.CheckButton) -> None:
+    app.search_library_only = button.get_active()
+    query = (app.search_query or "").strip()
+    if not query and app.search_entry:
+        query = app.search_entry.get_text().strip()
+    if not query:
+        return
+    app.activate_search_view()
+    if app.search_debounce_id:
+        GLib.source_remove(app.search_debounce_id)
+        app.search_debounce_id = None
+    app._start_search(query)
+
+
 def activate_search_view(app) -> None:
     if not app.search_active:
         app.search_active = True
@@ -164,11 +178,12 @@ async def _fetch_search_results_async(
     app, client: MusicAssistantClient, query: str
 ) -> dict:
     try:
+        library_only = bool(getattr(app, "search_library_only", True))
         search_results = await client.music.search(
             search_query=query,
             media_types=SEARCH_MEDIA_TYPES,
             limit=SEARCH_RESULT_LIMIT,
-            library_only=True,
+            library_only=library_only,
         )
         playlists = await _serialize_playlists(client, search_results.playlists)
         albums = await _serialize_albums(client, search_results.albums)
@@ -382,6 +397,7 @@ def populate_search_tracks(app, tracks: list[dict]) -> None:
             artist=track.get("artist", ""),
             album=track.get("album", ""),
             quality=track.get("quality", ""),
+            is_favorite=bool(track.get("is_favorite", False)),
         )
         row.source = track.get("source")
         track_image_url = track.get("image_url") or track.get("cover_image_url")

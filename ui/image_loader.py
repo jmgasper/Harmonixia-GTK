@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import threading
+from collections import OrderedDict
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
@@ -24,6 +25,40 @@ from constants import (
 
 _default_executor: concurrent.futures.ThreadPoolExecutor | None = None
 _executor_lock = threading.Lock()
+_TEXTURE_CACHE_MAX_DIM = 256
+_TEXTURE_CACHE_LIMIT = 256
+_texture_cache: OrderedDict[str, tuple[int, Gdk.Texture]] = OrderedDict()
+_texture_cache_lock = threading.Lock()
+
+
+def _get_cached_texture(image_url: str, size: int) -> Gdk.Texture | None:
+    if not image_url or size <= 0 or size > _TEXTURE_CACHE_MAX_DIM:
+        return None
+    with _texture_cache_lock:
+        cached = _texture_cache.get(image_url)
+        if not cached:
+            return None
+        cached_size, texture = cached
+        if cached_size < size:
+            return None
+        _texture_cache.move_to_end(image_url)
+        return texture
+
+
+def _store_cached_texture(
+    image_url: str, size: int, texture: Gdk.Texture
+) -> None:
+    if not image_url or size <= 0 or size > _TEXTURE_CACHE_MAX_DIM:
+        return
+    with _texture_cache_lock:
+        cached = _texture_cache.get(image_url)
+        if cached and cached[0] >= size:
+            _texture_cache.move_to_end(image_url)
+            return
+        _texture_cache[image_url] = (size, texture)
+        _texture_cache.move_to_end(image_url)
+        while len(_texture_cache) > _TEXTURE_CACHE_LIMIT:
+            _texture_cache.popitem(last=False)
 
 
 def _get_default_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -52,6 +87,21 @@ def extract_media_image_url(item: object, server_url: str) -> str | None:
         if resolved:
             return resolved
     return None
+
+
+def resolve_media_item_image_url(
+    client: object, item: object, server_url: str
+) -> str | None:
+    if client is not None and item is not None:
+        try:
+            image_url = client.get_media_item_image_url(item)
+        except Exception:
+            image_url = None
+        if image_url:
+            resolved = resolve_image_url(image_url, server_url)
+            if resolved:
+                return resolved
+    return extract_media_image_url(item, server_url)
 
 
 def iter_media_image_candidates(item: object):
@@ -143,6 +193,14 @@ def load_album_art_async(
         picture.expected_image_url = image_url
     except Exception:
         pass
+    cached_texture = _get_cached_texture(image_url, size)
+    if cached_texture is not None:
+        try:
+            picture.set_paintable(cached_texture)
+        except Exception:
+            pass
+        else:
+            return
     image_executor.submit(
         _fetch_album_art,
         image_url,
@@ -466,6 +524,24 @@ def decode_album_art(data: bytes) -> GdkPixbuf.Pixbuf | None:
         return None
 
 
+def load_svg_texture(svg_text: str) -> Gdk.Texture | None:
+    if not svg_text:
+        return None
+    try:
+        loader = GdkPixbuf.PixbufLoader.new()
+        loader.write(svg_text.encode("utf-8"))
+        loader.close()
+        pixbuf = loader.get_pixbuf()
+    except Exception:
+        return None
+    if not pixbuf:
+        return None
+    try:
+        return Gdk.Texture.new_for_pixbuf(pixbuf)
+    except Exception:
+        return None
+
+
 def scale_album_art(
     pixbuf: GdkPixbuf.Pixbuf, max_size: int = ALBUM_TILE_SIZE
 ) -> GdkPixbuf.Pixbuf:
@@ -521,6 +597,15 @@ def apply_album_art(
     sidebar_art: Gtk.Picture,
     sidebar_url: str,
 ) -> bool:
+    try:
+        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+    except Exception:
+        return False
+    _store_cached_texture(
+        image_url,
+        max(pixbuf.get_width(), pixbuf.get_height()),
+        texture,
+    )
     if sidebar_art is not None and picture is sidebar_art:
         if not sidebar_url or sidebar_url != image_url:
             return False
@@ -529,10 +614,6 @@ def apply_album_art(
             expected = picture.expected_image_url
             if not expected or expected != image_url:
                 return False
-    try:
-        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
-    except Exception:
-        return False
     try:
         picture.set_paintable(texture)
     except Exception:

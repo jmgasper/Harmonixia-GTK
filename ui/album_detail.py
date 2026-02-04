@@ -68,10 +68,18 @@ def build_album_detail_section(app) -> Gtk.Widget:
     title.set_wrap(True)
     title.set_ellipsize(Pango.EllipsizeMode.END)
 
-    artist = Gtk.Label(label="Artist", xalign=0)
-    artist.add_css_class("detail-artist")
-    artist.set_wrap(True)
-    artist.set_ellipsize(Pango.EllipsizeMode.END)
+    artist_label = Gtk.Label(label="Artist", xalign=0)
+    artist_label.add_css_class("detail-artist")
+    artist_label.set_wrap(True)
+    artist_label.set_ellipsize(Pango.EllipsizeMode.END)
+
+    artist_button = Gtk.Button()
+    artist_button.add_css_class("detail-artist-link")
+    artist_button.set_has_frame(False)
+    artist_button.set_halign(Gtk.Align.START)
+    artist_button.set_sensitive(False)
+    artist_button.set_child(artist_label)
+    artist_button.connect("clicked", app.on_album_detail_artist_clicked)
 
     play_button = Gtk.Button()
     play_button.add_css_class("suggested-action")
@@ -83,9 +91,13 @@ def build_album_detail_section(app) -> Gtk.Widget:
     play_button.set_child(play_icon)
     play_button.connect("clicked", app.on_album_play_clicked)
 
+    controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    controls_row.set_halign(Gtk.Align.START)
+    controls_row.append(play_button)
+
     info.append(title)
-    info.append(artist)
-    info.append(play_button)
+    info.append(artist_button)
+    info.append(controls_row)
 
     header.append(art)
     header.append(info)
@@ -121,7 +133,8 @@ def build_album_detail_section(app) -> Gtk.Widget:
     app.album_detail_background = background
     app.album_detail_art = art
     app.album_detail_title = title
-    app.album_detail_artist = artist
+    app.album_detail_artist = artist_label
+    app.album_detail_artist_button = artist_button
     app.album_detail_status_label = status
     app.album_detail_play_button = play_button
     return overlay

@@ -26,6 +26,10 @@ def serialize_track(
         album = getattr(track_album, "name", None) or album_name
 
     quality = describe_track_quality_fn(track)
+    if isinstance(track, dict):
+        is_favorite = bool(track.get("favorite", False))
+    else:
+        is_favorite = bool(getattr(track, "favorite", False))
     return {
         "track_number": track_number,
         "title": title,
@@ -34,6 +38,7 @@ def serialize_track(
         "artist": artist or "Unknown Artist",
         "album": album,
         "quality": quality,
+        "is_favorite": is_favorite,
         "source": track,
     }
 
@@ -109,6 +114,7 @@ def generate_sample_tracks(
                 "artist": artist,
                 "album": album_name,
                 "quality": "Lossless 44.1kHz/16-bit",
+                "is_favorite": False,
                 "source": None,
             }
         )
@@ -127,11 +133,14 @@ def snapshot_track(track: object, get_track_identity_fn) -> dict:
     image_url = getattr(track, "cover_image_url", None) or getattr(
         track, "image_url", None
     )
+    quality = getattr(track, "quality", "") or ""
     return {
         "track_number": track.track_number,
         "title": track.title,
         "artist": track.artist,
+        "album": getattr(track, "album", ""),
         "length_seconds": track.length_seconds,
+        "quality": quality,
         "source": source,
         "source_uri": source_uri,
         "image_url": image_url,

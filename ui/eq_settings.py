@@ -170,9 +170,12 @@ def build_eq_section(app) -> Gtk.Widget:
     app.eq_graph_placeholder = graph_placeholder
 
     eq_manager = _get_eq_manager(app)
-    eq_state = eq_manager.get_eq_state() if eq_manager else {}
-    app.eq_enabled = bool(eq_state.get("enabled", False))
-    toggle_switch.set_active(app.eq_enabled)
+    if eq_manager:
+        try:
+            eq_manager.set_eq_enabled(bool(app.eq_enabled))
+        except Exception:
+            _LOGGER.debug("Failed to sync EQ enabled state on startup.")
+    toggle_switch.set_active(bool(app.eq_enabled))
 
     toggle_handler_id = toggle_switch.connect(
         "state-set",

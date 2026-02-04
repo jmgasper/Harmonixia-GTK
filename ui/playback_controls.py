@@ -56,6 +56,31 @@ def build_controls(app) -> Gtk.Widget:
     title_button.set_child(title)
     title_button.connect("clicked", app.on_now_playing_title_clicked)
 
+    provider_icon = Gtk.Image()
+    provider_icon.add_css_class("now-playing-provider-icon")
+    provider_icon.set_pixel_size(14)
+    provider_icon.set_visible(False)
+
+    provider_label = Gtk.Label(label="")
+    provider_label.add_css_class("now-playing-provider-label")
+    provider_label.set_xalign(0)
+    provider_label.set_ellipsize(Pango.EllipsizeMode.END)
+    provider_label.set_single_line_mode(True)
+
+    provider_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+    provider_box.add_css_class("now-playing-provider")
+    provider_box.set_halign(Gtk.Align.END)
+    provider_box.set_valign(Gtk.Align.CENTER)
+    provider_box.set_visible(False)
+    provider_box.append(provider_icon)
+    provider_box.append(provider_label)
+
+    title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    title_row.set_hexpand(True)
+    title_row.set_valign(Gtk.Align.CENTER)
+    title_row.append(title_button)
+    title_row.append(provider_box)
+
     artist = Gtk.Label(label="")
     artist.add_css_class("now-playing-artist")
     artist.set_xalign(0)
@@ -70,6 +95,20 @@ def build_controls(app) -> Gtk.Widget:
     artist_button.set_halign(Gtk.Align.FILL)
     artist_button.set_child(artist)
     artist_button.connect("clicked", app.on_now_playing_artist_clicked)
+
+    quality = Gtk.Label(label="")
+    quality.add_css_class("now-playing-quality")
+    quality.set_xalign(1)
+    quality.set_halign(Gtk.Align.END)
+    quality.set_ellipsize(Pango.EllipsizeMode.END)
+    quality.set_single_line_mode(True)
+    quality.set_visible(False)
+
+    artist_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    artist_row.set_hexpand(True)
+    artist_row.set_valign(Gtk.Align.CENTER)
+    artist_row.append(artist_button)
+    artist_row.append(quality)
 
     progress_row = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -86,6 +125,11 @@ def build_controls(app) -> Gtk.Widget:
     progress.set_hexpand(True)
     progress.set_valign(Gtk.Align.CENTER)
     progress.set_fraction(0.0)
+    if hasattr(progress, "set_can_target"):
+        progress.set_can_target(True)
+    progress_gesture = Gtk.GestureClick.new()
+    progress_gesture.connect("released", app.on_playback_progress_clicked)
+    progress.add_controller(progress_gesture)
 
     time_total = Gtk.Label(label="0:00")
     time_total.add_css_class("now-playing-time")
@@ -95,8 +139,8 @@ def build_controls(app) -> Gtk.Widget:
     progress_row.append(progress)
     progress_row.append(time_total)
 
-    now_playing.append(title_button)
-    now_playing.append(artist_button)
+    now_playing.append(title_row)
+    now_playing.append(artist_row)
     now_playing.append(progress_row)
 
     app.previous_button = previous_button
@@ -105,8 +149,12 @@ def build_controls(app) -> Gtk.Widget:
     app.next_button = next_button
     app.now_playing_title_button = title_button
     app.now_playing_title_label = title
+    app.now_playing_provider_box = provider_box
+    app.now_playing_provider_icon = provider_icon
+    app.now_playing_provider_label = provider_label
     app.now_playing_artist_button = artist_button
     app.now_playing_artist_label = artist
+    app.now_playing_quality_label = quality
     app.playback_progress_bar = progress
     app.playback_time_current_label = time_current
     app.playback_time_total_label = time_total
@@ -120,6 +168,7 @@ def build_controls(app) -> Gtk.Widget:
     volume.set_size_request(120, -1)
     initial_volume = int(round(app.sendspin_manager.volume * 100))
     volume.set_value(initial_volume)
+    app.last_volume_value = initial_volume
     volume.connect("value-changed", app.on_volume_changed)
     drag_gesture = Gtk.GestureClick.new()
     drag_gesture.connect("pressed", app.on_volume_drag_begin)

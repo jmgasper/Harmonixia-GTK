@@ -1,10 +1,13 @@
 """UI event handlers for MusicApp."""
 
 import logging
+import time
+from types import SimpleNamespace
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from music_assistant_models.enums import PlaybackState
+from ui import image_loader
 
 
 def on_track_action_clicked(app, button: Gtk.Button, menu_button, action: str) -> None:
@@ -29,6 +32,18 @@ def on_track_action_clicked(app, button: Gtk.Button, menu_button, action: str) -
         from ui import playlist_manager
 
         playlist_manager.show_add_to_playlist_dialog(app, track)
+        return
+    if action == "Add to favorites":
+        if track:
+            from ui import favorites_manager
+
+            favorites_manager.add_track_to_favorites(app, track)
+        return
+    if action == "Remove from favorites":
+        if track:
+            from ui import favorites_manager
+
+            favorites_manager.remove_track_from_favorites(app, track)
         return
     if action == "Add to new playlist":
         from ui import playlist_manager
@@ -60,22 +75,26 @@ def clear_track_selection(app, selection=None) -> None:
 
 
 def on_play_pause_clicked(app, _button) -> None:
-    if not app.playback_track_info:
-        return
     if app.playback_state == PlaybackState.PLAYING:
-        app.set_playback_state(PlaybackState.PAUSED)
         app.send_playback_command("pause")
     else:
-        app.set_playback_state(PlaybackState.PLAYING)
-        app.send_playback_command("resume")
+        app.send_playback_command("play")
 
 
 def on_previous_clicked(app, _button) -> None:
-    app.handle_previous_action()
+    app.send_playback_command("previous")
 
 
 def on_next_clicked(app, _button) -> None:
-    app.handle_next_action()
+    app.send_playback_command("next")
+
+
+def on_repeat_clicked(app, _button) -> None:
+    app.cycle_repeat_mode()
+
+
+def on_shuffle_clicked(app, _button) -> None:
+    app.toggle_shuffle()
 
 
 def on_volume_changed(app, scale: Gtk.Scale) -> None:
@@ -107,6 +126,31 @@ def on_volume_drag_end(
     app, _gesture, _n_press: int, _x: float, _y: float
 ) -> None:
     app.volume_dragging = False
+    if app.pending_volume_value is None and app.last_volume_value is not None:
+        app.update_volume_slider(app.last_volume_value)
+
+
+def on_playback_progress_clicked(
+    app, _gesture, _n_press: int, x: float, _y: float
+) -> None:
+    progress = app.playback_progress_bar
+    if not progress or app.playback_track_info is None:
+        return
+    duration = app.playback_duration or 0
+    if duration <= 0:
+        return
+    width = progress.get_allocated_width()
+    if width <= 0:
+        return
+    fraction = max(0.0, min(1.0, x / width))
+    position = int(round(fraction * duration))
+    position = max(0, min(position, int(duration)))
+    app.playback_elapsed = float(position)
+    app.playback_last_tick = time.monotonic()
+    app.update_playback_progress_ui()
+    app.send_playback_command("seek", position=position)
+    if app.mpris_manager:
+        app.mpris_manager.emit_mpris_seeked(int(position * 1_000_000))
 
 
 def on_now_playing_title_clicked(app, _button) -> None:
@@ -123,16 +167,55 @@ def on_now_playing_artist_clicked(app, _button) -> None:
     app.show_artist_albums(artist_name, previous_view)
 
 
+def on_album_detail_artist_clicked(app, _button) -> None:
+    album = getattr(app, "current_album", None)
+    if not album:
+        return
+    if isinstance(album, dict):
+        artists = album.get("artists")
+    else:
+        artists = getattr(album, "artists", None)
+    artist_name = _pick_artist_name(artists)
+    if not artist_name:
+        return
+    previous_view = _get_current_view(app)
+    if previous_view == "artist-albums":
+        previous_view = None
+    app.show_artist_albums(artist_name, previous_view)
+
+
 def on_now_playing_art_clicked(
     app, _gesture, _n_press: int, _x: float, _y: float
 ) -> None:
     _show_now_playing_album(app)
 
 
+def on_now_playing_art_context_menu(
+    app, _gesture, _n_press: int, x: float, y: float
+) -> None:
+    popover = getattr(app, "sidebar_now_playing_popover", None)
+    if not popover:
+        return
+    track = _build_now_playing_track_action_item(app)
+    if not track:
+        return
+    for button in getattr(app, "sidebar_now_playing_action_buttons", []):
+        button.track_item = track
+    if hasattr(popover, "set_pointing_to"):
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        popover.set_pointing_to(rect)
+    popover.popup()
+
+
 def _show_now_playing_album(app) -> None:
     album = _resolve_now_playing_album(app)
     if not album:
         return
+    album = _hydrate_now_playing_album(app, album)
     previous_view = _get_current_view(app)
     if previous_view and previous_view != "album-detail":
         app.album_detail_previous_view = previous_view
@@ -160,6 +243,158 @@ def _resolve_now_playing_album(app):
     if _is_album_like(playback_album):
         return playback_album
     return None
+
+
+def _build_now_playing_track_action_item(app) -> object | None:
+    track_info = app.playback_track_info or {}
+    if not track_info:
+        return None
+    source = track_info.get("source")
+    source_uri = track_info.get("source_uri")
+    uri = None
+    if source is not None:
+        if isinstance(source, dict):
+            uri = source.get("uri") or source_uri
+        else:
+            uri = getattr(source, "uri", None) or source_uri
+    else:
+        uri = source_uri
+    if source is not None and not isinstance(source, dict) and getattr(
+        source, "uri", None
+    ):
+        source_obj = source
+    else:
+        source_obj = SimpleNamespace(uri=uri)
+    return SimpleNamespace(
+        title=track_info.get("title") or "Unknown Track",
+        artist=track_info.get("artist") or "Unknown Artist",
+        album=track_info.get("album") or "",
+        length_seconds=track_info.get("length_seconds") or 0,
+        source=source_obj,
+    )
+
+
+def _hydrate_now_playing_album(app, album: object) -> object:
+    track_info = app.playback_track_info or {}
+    source = track_info.get("source")
+    payload = _coerce_album_payload(album)
+    if payload is None:
+        return album
+    if not payload.get("name"):
+        album_name = track_info.get("album")
+        if isinstance(album_name, str):
+            album_name = album_name.strip()
+        if album_name:
+            payload["name"] = album_name
+    if not payload.get("artists"):
+        artist_name = _resolve_artist_name_from_track(
+            source, track_info.get("artist")
+        )
+        if artist_name:
+            payload["artists"] = [artist_name]
+    if not image_loader.extract_album_image_url(payload, app.server_url):
+        image_url = track_info.get("image_url")
+        if isinstance(image_url, str):
+            image_url = image_url.strip() or None
+        else:
+            image_url = None
+        if not image_url and source:
+            image_url = image_loader.extract_media_image_url(
+                source, app.server_url
+            )
+        if not image_url:
+            playback_album = getattr(app, "playback_album", None)
+            if playback_album:
+                image_url = image_loader.extract_media_image_url(
+                    playback_album, app.server_url
+                )
+        if image_url:
+            payload["image_url"] = image_url
+    return payload
+
+
+def _coerce_album_payload(album: object) -> dict | None:
+    if album is None:
+        return None
+    if isinstance(album, dict):
+        return dict(album)
+    payload: dict = {}
+    name = getattr(album, "name", None)
+    if isinstance(name, str):
+        name = name.strip() or None
+    if name:
+        payload["name"] = name
+    item_id = getattr(album, "item_id", None) or getattr(album, "id", None)
+    if item_id is not None:
+        payload["item_id"] = item_id
+    provider = (
+        getattr(album, "provider", None)
+        or getattr(album, "provider_instance", None)
+        or getattr(album, "provider_domain", None)
+    )
+    if isinstance(provider, str):
+        provider = provider.strip() or None
+    if provider:
+        payload["provider"] = provider
+    uri = getattr(album, "uri", None)
+    if isinstance(uri, str):
+        uri = uri.strip() or None
+    if uri:
+        payload["uri"] = uri
+    album_type = getattr(album, "album_type", None)
+    if album_type is not None:
+        payload["album_type"] = getattr(album_type, "value", album_type)
+    mappings = getattr(album, "provider_mappings", None) or []
+    if mappings:
+        payload["provider_mappings"] = _serialize_provider_mappings(mappings)
+    artist_names = _collect_artist_names(getattr(album, "artists", None))
+    if artist_names:
+        payload["artists"] = artist_names
+    return payload
+
+
+def _serialize_provider_mappings(mappings: object) -> list[dict]:
+    if isinstance(mappings, dict):
+        mappings = [mappings]
+    elif not isinstance(mappings, (list, tuple, set)):
+        mappings = [mappings]
+    serialized = []
+    for mapping in mappings:
+        if isinstance(mapping, dict):
+            serialized.append(dict(mapping))
+            continue
+        serialized.append(
+            {
+                "item_id": getattr(mapping, "item_id", None),
+                "provider_instance": getattr(mapping, "provider_instance", None),
+                "provider_domain": getattr(mapping, "provider_domain", None),
+                "available": getattr(mapping, "available", True),
+            }
+        )
+    return serialized
+
+
+def _collect_artist_names(artists: object) -> list[str]:
+    if not artists:
+        return []
+    if isinstance(artists, str):
+        cleaned = artists.strip()
+        return [cleaned] if cleaned else []
+    if not isinstance(artists, (list, tuple, set)):
+        artists = [artists]
+    names: list[str] = []
+    for artist in artists:
+        if isinstance(artist, dict):
+            name = artist.get("name") or artist.get("sort_name")
+        else:
+            name = getattr(artist, "name", None) or getattr(
+                artist, "sort_name", None
+            )
+            if name is None:
+                name = str(artist)
+        if name:
+            names.append(str(name).strip())
+    return names
 
 
 def _resolve_now_playing_artist_name(app) -> str | None:

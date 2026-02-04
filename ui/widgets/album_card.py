@@ -1,6 +1,6 @@
 from gi.repository import Gtk, Pango
 
-from constants import MEDIA_TILE_SIZE
+from constants import HOME_ALBUM_ART_SIZE, MEDIA_TILE_SIZE
 from ui import image_loader, ui_utils
 
 
@@ -12,6 +12,7 @@ def make_album_card(
     art_size: int = MEDIA_TILE_SIZE,
     card_class: str | None = None,
     show_artist: bool = True,
+    load_art: bool = True,
 ) -> Gtk.Widget:
     card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
     card.add_css_class("album-card")
@@ -19,7 +20,7 @@ def make_album_card(
         card.add_css_class(card_class)
     card.set_size_request(art_size, -1)
     card.set_halign(Gtk.Align.CENTER)
-    card.set_valign(Gtk.Align.CENTER)
+    card.set_valign(Gtk.Align.START)
     card.set_hexpand(False)
     card.set_vexpand(False)
 
@@ -33,7 +34,7 @@ def make_album_card(
         art.set_content_fit(Gtk.ContentFit.COVER)
     elif hasattr(art, "set_keep_aspect_ratio"):
         art.set_keep_aspect_ratio(False)
-    if image_url:
+    if image_url and load_art:
         image_loader.load_album_art_async(
             art,
             image_url,
@@ -61,7 +62,11 @@ def make_album_card(
     return card
 
 
-def make_home_album_card(app, album: dict) -> Gtk.Widget:
+def make_home_album_card(
+    app,
+    album: dict,
+    art_size: int = HOME_ALBUM_ART_SIZE,
+) -> Gtk.Widget:
     title = app.get_album_name(album)
     artist_label = ui_utils.format_artist_names(album.get("artists") or [])
     image_url = image_loader.extract_album_image_url(album, app.server_url)
@@ -70,7 +75,7 @@ def make_home_album_card(app, album: dict) -> Gtk.Widget:
         title,
         artist_label,
         image_url,
-        art_size=MEDIA_TILE_SIZE,
+        art_size=art_size,
     )
 
 
@@ -79,6 +84,7 @@ def make_playlist_card(
     title: str,
     image_url: str | None = None,
     art_size: int = MEDIA_TILE_SIZE,
+    load_art: bool = True,
 ) -> Gtk.Widget:
     return make_album_card(
         app,
@@ -88,4 +94,5 @@ def make_playlist_card(
         art_size=art_size,
         card_class="playlist-card",
         show_artist=False,
+        load_art=load_art,
     )

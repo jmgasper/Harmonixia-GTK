@@ -290,6 +290,31 @@ class AudioPipeline:
         except Exception:
             self._logger.debug("Flush events failed.", exc_info=True)
 
+    def reset_stream_timing(self) -> None:
+        self.stream_start_ts = None
+        self.last_pts_ns = None
+        if self._bytes_per_sample_override is not None:
+            self._bytes_per_sample_override = None
+            if self.stream_format and self.appsrc:
+                self._update_caps(self.stream_format)
+
+    def _get_pipeline_running_time_ns(self) -> int | None:
+        if not self.pipeline or Gst is None:
+            return None
+        clock = self.pipeline.get_clock()
+        if not clock:
+            return None
+        base_time = self.pipeline.get_base_time()
+        if base_time is None or base_time <= 0:
+            return None
+        try:
+            now = clock.get_time()
+        except Exception:
+            return None
+        if now <= base_time:
+            return 0
+        return int(now - base_time)
+
     def push_audio(
         self,
         timestamp_us: int,
@@ -339,7 +364,13 @@ class AudioPipeline:
         sample_count = len(data) // frame_size
         duration_ns = int(sample_count / format_info.sample_rate * 1_000_000_000)
         if self.stream_start_ts is None:
-            self.stream_start_ts = timestamp_us
+            self.last_pts_ns = None
+            running_time_ns = self._get_pipeline_running_time_ns()
+            if running_time_ns:
+                # Align the first buffer to the current running time to avoid late drops.
+                self.stream_start_ts = timestamp_us - int(running_time_ns / 1000)
+            else:
+                self.stream_start_ts = timestamp_us
         pts_ns = max(0, (timestamp_us - self.stream_start_ts) * 1000)
         if self.last_pts_ns is not None and pts_ns <= self.last_pts_ns:
             pts_ns = self.last_pts_ns + duration_ns

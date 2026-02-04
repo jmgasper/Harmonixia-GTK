@@ -2,6 +2,8 @@ import logging
 
 from gi.repository import Gio, GObject, Gtk, Pango
 
+from constants import TRACK_ART_SIZE
+from ui import image_loader
 from ui.widgets.track_row import TrackRow
 
 DEFAULT_ACTION_LABELS = (
@@ -9,6 +11,25 @@ DEFAULT_ACTION_LABELS = (
     "Add to existing playlist",
     "Add to new playlist",
 )
+FAVORITE_ADD_LABEL = "Add to favorites"
+FAVORITE_REMOVE_LABEL = "Remove from favorites"
+FAVORITES_ACTION_LABELS = (
+    FAVORITE_ADD_LABEL,
+    FAVORITE_REMOVE_LABEL,
+)
+
+
+def build_action_labels(
+    action_labels: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    labels = list(action_labels or DEFAULT_ACTION_LABELS)
+    labels = [label for label in labels if label not in FAVORITES_ACTION_LABELS]
+    insert_at = 0
+    if "Play" in labels:
+        insert_at = labels.index("Play") + 1
+    for label in reversed(FAVORITES_ACTION_LABELS):
+        labels.insert(insert_at, label)
+    return tuple(labels)
 
 
 def build_tracks_table(
@@ -19,6 +40,7 @@ def build_tracks_table(
     selection_attr: str = "album_tracks_selection",
     view_attr: str = "album_tracks_view",
     action_labels: tuple[str, ...] | None = None,
+    use_track_art: bool = False,
 ) -> Gtk.Widget:
     store = Gio.ListStore.new(TrackRow)
     sort_model = Gtk.SortListModel.new(store, None)
@@ -42,14 +64,17 @@ def build_tracks_table(
     sort_model.set_sorter(view.get_sorter())
 
     playing_column = make_playing_indicator_column(app)
-    number_column = make_track_column(
-        app,
-        "#",
-        "track_number",
-        xalign=1.0,
-        numeric=True,
-        fixed_width=60,
-    )
+    if use_track_art:
+        leading_column = make_track_art_column(app)
+    else:
+        leading_column = make_track_column(
+            app,
+            "#",
+            "track_number",
+            xalign=1.0,
+            numeric=True,
+            fixed_width=60,
+        )
     title_column = make_track_column(
         app,
         "Track",
@@ -72,7 +97,7 @@ def build_tracks_table(
     actions_column = make_actions_column(app, action_labels=action_labels)
 
     view.append_column(playing_column)
-    view.append_column(number_column)
+    view.append_column(leading_column)
     view.append_column(title_column)
     view.append_column(length_column)
     view.append_column(artist_column)
@@ -105,6 +130,31 @@ def make_playing_indicator_column(app) -> Gtk.ColumnViewColumn:
     )
     column = Gtk.ColumnViewColumn.new("", factory)
     column.set_fixed_width(28)
+    return column
+
+
+def make_track_art_column(app) -> Gtk.ColumnViewColumn:
+    factory = Gtk.SignalListItemFactory()
+    factory.connect(
+        "setup",
+        lambda factory, list_item: on_track_art_setup(
+            app, factory, list_item
+        ),
+    )
+    factory.connect(
+        "bind",
+        lambda factory, list_item: on_track_art_bind(
+            app, factory, list_item
+        ),
+    )
+    factory.connect(
+        "unbind",
+        lambda factory, list_item: on_track_art_unbind(
+            app, factory, list_item
+        ),
+    )
+    column = Gtk.ColumnViewColumn.new("", factory)
+    column.set_fixed_width(TRACK_ART_SIZE + 16)
     return column
 
 
@@ -151,6 +201,96 @@ def on_track_playing_unbind(
         item.disconnect(handler_id)
     list_item.playing_handler_id = None
     list_item.playing_item = None
+
+
+def on_track_art_setup(
+    app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
+) -> None:
+    art = Gtk.Picture()
+    art.add_css_class("track-art")
+    art.set_size_request(TRACK_ART_SIZE, TRACK_ART_SIZE)
+    art.set_halign(Gtk.Align.CENTER)
+    art.set_valign(Gtk.Align.CENTER)
+    art.set_can_shrink(True)
+    art.set_margin_start(6)
+    art.set_margin_end(6)
+    art.set_margin_top(2)
+    art.set_margin_bottom(2)
+    if hasattr(art, "set_content_fit") and hasattr(Gtk, "ContentFit"):
+        art.set_content_fit(Gtk.ContentFit.COVER)
+    elif hasattr(art, "set_keep_aspect_ratio"):
+        art.set_keep_aspect_ratio(False)
+    container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+    container.set_halign(Gtk.Align.CENTER)
+    container.set_valign(Gtk.Align.CENTER)
+    container.append(art)
+    list_item.set_child(container)
+    list_item.art_picture = art
+
+
+def on_track_art_bind(
+    app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
+) -> None:
+    item = list_item.get_item()
+    art = getattr(list_item, "art_picture", None)
+    if art is None:
+        return
+    image_url = _resolve_track_art_url(app, item)
+    if not image_url:
+        art.set_paintable(None)
+        try:
+            art.expected_image_url = None
+        except Exception:
+            pass
+        return
+    if getattr(art, "expected_image_url", None) == image_url:
+        try:
+            current_paintable = art.get_paintable()
+        except Exception:
+            current_paintable = None
+        if current_paintable is not None:
+            return
+    art.set_paintable(None)
+    image_loader.load_album_art_async(
+        art,
+        image_url,
+        TRACK_ART_SIZE,
+        app.auth_token,
+        app.image_executor,
+        app.get_cache_dir(),
+    )
+
+
+def on_track_art_unbind(
+    app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
+) -> None:
+    art = getattr(list_item, "art_picture", None)
+    if art is None:
+        return
+    art.set_paintable(None)
+    try:
+        art.expected_image_url = None
+    except Exception:
+        pass
+
+
+def _resolve_track_art_url(app, item: TrackRow | None) -> str | None:
+    if item is None:
+        return None
+    image_url = getattr(item, "image_url", None) or getattr(
+        item, "cover_image_url", None
+    )
+    if not image_url:
+        source = getattr(item, "source", None)
+        if source is not None:
+            image_url = image_loader.extract_media_image_url(
+                source,
+                app.server_url,
+            )
+    if not image_url:
+        return None
+    resolved = image_loader.resolve_image_url(image_url, app.server_url)
+    return resolved or image_url
 
 
 def on_track_playing_notify(
@@ -255,7 +395,7 @@ def make_actions_column(
     app, action_labels: tuple[str, ...] | None = None
 ) -> Gtk.ColumnViewColumn:
     factory = Gtk.SignalListItemFactory()
-    labels = action_labels or DEFAULT_ACTION_LABELS
+    labels = build_action_labels(action_labels)
     factory.connect(
         "setup",
         lambda factory, list_item: on_track_actions_setup(
@@ -265,6 +405,12 @@ def make_actions_column(
     factory.connect(
         "bind",
         lambda factory, list_item: on_track_actions_bind(
+            app, factory, list_item
+        ),
+    )
+    factory.connect(
+        "unbind",
+        lambda factory, list_item: on_track_actions_unbind(
             app, factory, list_item
         ),
     )
@@ -325,3 +471,48 @@ def on_track_actions_bind(
         button.track_item = item
         if button.get_label() == "Remove from this playlist":
             button.set_sensitive(remove_enabled)
+    is_favorite = bool(getattr(item, "is_favorite", False))
+    update_favorite_action_buttons(list_item, is_favorite)
+    if item is not None:
+        handler_id = item.connect(
+            "notify::is-favorite",
+            lambda item, param, list_item=list_item: on_track_favorite_notify(
+                app, item, param, list_item
+            ),
+        )
+        list_item.favorite_handler_id = handler_id
+        list_item.favorite_item = item
+
+
+def on_track_actions_unbind(
+    app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
+) -> None:
+    item = getattr(list_item, "favorite_item", None)
+    handler_id = getattr(list_item, "favorite_handler_id", None)
+    if item is not None and handler_id is not None:
+        item.disconnect(handler_id)
+    list_item.favorite_handler_id = None
+    list_item.favorite_item = None
+    for button in getattr(list_item, "action_buttons", []):
+        button.track_item = None
+
+
+def on_track_favorite_notify(
+    app,
+    item: TrackRow,
+    _param: GObject.ParamSpec,
+    list_item: Gtk.ListItem,
+) -> None:
+    update_favorite_action_buttons(list_item, bool(item.is_favorite))
+
+
+def update_favorite_action_buttons(
+    list_item: Gtk.ListItem,
+    is_favorite: bool,
+) -> None:
+    for button in getattr(list_item, "action_buttons", []):
+        label = button.get_label()
+        if label == FAVORITE_ADD_LABEL:
+            button.set_visible(not is_favorite)
+        elif label == FAVORITE_REMOVE_LABEL:
+            button.set_visible(is_favorite)

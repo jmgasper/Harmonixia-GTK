@@ -269,6 +269,10 @@ def connect_to_server(
         app.audio_pipeline.destroy_pipeline()
         app.clear_home_recent_lists()
         playlist_manager.populate_playlists_list(app, [])
+        app.provider_manifests = {}
+        app.provider_instances = {}
+        app.provider_icon_cache = {}
+        app.provider_manifest_loading = False
 
     callbacks = {
         "get_server_url": lambda: app.server_url,

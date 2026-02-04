@@ -1,0 +1,149 @@
+[33mFactory Details:[0m
+  [94mRank                     [0mprimary + 10 (266)[0m
+  [94mLong-name                [0mPulseAudio Audio Sink[0m
+  [94mKlass                    [0mSink/Audio[0m
+  [94mDescription              [0mPlays audio to a PulseAudio server[0m
+  [94mAuthor                   [0mLennart Poettering[0m
+  [94mDocumentation            [0m[0mhttps://gstreamer.freedesktop.org/documentation/pulseaudio/pulsesink.html[0m
+
+[33mPlugin Details[0m:
+  [94mName                     [0m[0mpulseaudio[0m
+  [94mDescription              [0m[0mPulseAudio plugin library[0m
+  [94mFilename                 [0m[0m/usr/lib/gstreamer-1.0/libgstpulseaudio.so[0m
+  [94mVersion                  [0m[0m1.26.10[0m
+  [94mLicense                  [0m[0mLGPL[0m
+  [94mSource module            [0m[0mgst-plugins-good[0m
+  [94mDocumentation            [0m[0mhttps://gstreamer.freedesktop.org/documentation/pulseaudio/[0m
+  [94mSource release date      [0m[0m2025-12-25[0m
+  [94mBinary package           [0m[0mArch Linux GStreamer 1.26.10-1[0m
+  [94mOrigin URL               [0m[0mhttps://www.archlinux.org/[0m
+
+[32mGObject[0m
+ [95m+----[0m[32mGInitiallyUnowned[0m
+       [95m+----[0m[32mGstObject[0m
+             [95m+----[0m[32mGstElement[0m
+                   [95m+----[0m[32mGstBaseSink[0m
+                         [95m+----[0m[32mGstAudioBaseSink[0m
+                               [95m+----[0m[32mGstPulseSink[0m
+
+[33mImplemented Interfaces[0m:
+  [32mGstStreamVolume[0m
+
+[33mElement Flags[0m:
+  - [32mSINK[0m
+  - [32mPROVIDE_CLOCK[0m
+
+[33mPad Templates[0m:
+  [94mSINK template[0m: [0m'sink'[0m
+    [94mAvailability[0m: [0mAlways[0m
+    [94mCapabilities[0m:
+      [33maudio/x-raw[0m
+        [36m         format[0m: [94m{ (string)S16LE, (string)S16BE, (string)F32LE, (string)F32BE, (string)S32LE, (string)S32BE, (string)S24LE, (string)S24BE, (string)S24_32LE, (string)S24_32BE, (string)U8 }[0m
+        [36m         layout[0m: [94minterleaved[0m
+        [36m           rate[0m: [94m[ 1, 768000 ][0m
+        [36m       channels[0m: [94m[ 1, 32 ][0m
+      [33maudio/x-alaw[0m
+        [36m           rate[0m: [94m[ 1, 768000 ][0m
+        [36m       channels[0m: [94m[ 1, 32 ][0m
+      [33maudio/x-mulaw[0m
+        [36m           rate[0m: [94m[ 1, 768000 ][0m
+        [36m       channels[0m: [94m[ 1, 32 ][0m
+      [33maudio/x-ac3[0m
+        [36m         framed[0m: [94mtrue[0m
+      [33maudio/x-eac3[0m
+        [36m         framed[0m: [94mtrue[0m
+      [33maudio/x-dts[0m
+        [36m         framed[0m: [94mtrue[0m
+        [36m     block-size[0m: [94m{ (int)512, (int)1024, (int)2048 }[0m
+      [33maudio/mpeg[0m
+        [36m    mpegversion[0m: [94m1[0m
+        [36mmpegaudioversion[0m: [94m[ 1, 3 ][0m
+        [36m         parsed[0m: [94mtrue[0m
+      [33maudio/mpeg[0m
+        [36m    mpegversion[0m: [94m{ (int)2, (int)4 }[0m
+        [36m         framed[0m: [94mtrue[0m
+        [36m  stream-format[0m: [94madts[0m
+
+[94mClocking Interaction[0m:
+  [0melement provides a clock[0m
+[0mElement has no URI handling capabilities.[0m
+
+[33mPads:[0m
+  [94mSINK[0m: [0m'sink'[0m
+    [94mPad Template[0m: [0m'sink'[0m
+
+[33mElement Properties[0m:
+
+  [94malignment-threshold [0m: [0mTimestamp alignment threshold in nanoseconds[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mUnsigned Integer64[0m. [33mRange[0m: [36m1 - 18446744073709551614[0m [33mDefault[0m: [36m40000000[0m 
+  
+  [94masync               [0m: [0mGo asynchronously to PAUSED[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mBoolean[0m. [33mDefault[0m: [36mtrue[0m
+  
+  [94mblocksize           [0m: [0mSize in bytes to pull per buffer (0 = default)[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mUnsigned Integer[0m. [33mRange[0m: [36m0 - 4294967295[0m [33mDefault[0m: [36m4096[0m 
+  
+  [94mbuffer-time         [0m: [0mSize of audio buffer in microseconds, this is the minimum latency that the sink reports[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mInteger64[0m. [33mRange[0m: [36m1 - 9223372036854775807[0m [33mDefault[0m: [36m200000[0m 
+  
+  [94mcan-activate-pull   [0m: [0mAllow pull-based scheduling[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mBoolean[0m. [33mDefault[0m: [36mfalse[0m
+  
+  [94mclient-name         [0m: [0mThe PulseAudio client name to use[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m, [36mchangeable only in NULL or READY state[0m
+                        [32mString[0m. [33mDefault[0m: [36m"gst-inspect-1.0"[0m
+  
+  [94mcurrent-device      [0m: [0mThe current PulseAudio sink device[0m
+                        [33mflags[0m: [36mreadable[0m
+                        [32mString[0m. [33mDefault[0m: [36m""[0m
+  
+  [94mdevice              [0m: [0mThe PulseAudio sink device to connect to[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mString[0m. [33mDefault[0m: [36mnull[0m
+  
+  [94mdevice-name         [0m: [0mHuman-readable name of the sound device[0m
+                        [33mflags[0m: [36mreadable[0m
+                        [32mString[0m. [33mDefault[0m: [36mnull[0m
+  
+  [94mdiscont-wait        [0m: [0mWindow of time in nanoseconds to wait before creating a discontinuity[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mUnsigned Integer64[0m. [33mRange[0m: [36m0 - 18446744073709551614[0m [33mDefault[0m: [36m1000000000[0m 
+  
+  [94mdrift-tolerance     [0m: [0mTolerance for clock drift in microseconds[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mInteger64[0m. [33mRange[0m: [36m1 - 9223372036854775807[0m [33mDefault[0m: [36m40000[0m 
+  
+  [94menable-last-sample  [0m: [0mEnable the last-sample property[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mBoolean[0m. [33mDefault[0m: [36mfalse[0m
+  
+  [94mlast-sample         [0m: [0mThe last sample received in the sink[0m
+                        [33mflags[0m: [36mreadable[0m
+                        [0mBoxed pointer of type[0m [32m"GstSample"[0m
+  
+  [94mlatency-time        [0m: [0mThe minimum amount of data to write in each iteration in microseconds[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mInteger64[0m. [33mRange[0m: [36m1 - 9223372036854775807[0m [33mDefault[0m: [36m10000[0m 
+  
+  [94mmax-bitrate         [0m: [0mThe maximum bits per second to render (0 = disabled)[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mUnsigned Integer64[0m. [33mRange[0m: [36m0 - 18446744073709551615[0m [33mDefault[0m: [36m0[0m 
+  
+  [94mmax-lateness        [0m: [0mMaximum number of nanoseconds that a buffer can be late before it is dropped (-1 unlimited)[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mInteger64[0m. [33mRange[0m: [36m-1 - 9223372036854775807[0m [33mDefault[0m: [36m-1[0m 
+  
+  [94mmute                [0m: [0mMute state of this stream[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mBoolean[0m. [33mDefault[0m: [36mfalse[0m
+  
+  [94mname                [0m: [0mThe name of the object[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mString[0m. [33mDefault[0m: [36m"pulsesink0"[0m
+  
+  [94mparent              [0m: [0mThe parent of t

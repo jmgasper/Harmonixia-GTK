@@ -104,6 +104,18 @@ def build_search_section(app) -> Gtk.Widget:
     container.set_vexpand(True)
     app.search_section_container = container
 
+    scope_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    scope_box.add_css_class("search-group")
+    scope_box.set_hexpand(True)
+    scope_box.set_halign(Gtk.Align.FILL)
+    scope_toggle = Gtk.CheckButton(label="Search library only")
+    scope_toggle.add_css_class("search-scope-toggle")
+    scope_toggle.set_active(bool(getattr(app, "search_library_only", True)))
+    scope_toggle.connect("toggled", app.on_search_scope_toggled)
+    scope_box.append(scope_toggle)
+    container.append(scope_box)
+    app.search_scope_toggle = scope_toggle
+
     status = Gtk.Label()
     status.add_css_class("status-label")
     status.set_xalign(0)

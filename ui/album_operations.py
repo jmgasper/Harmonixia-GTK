@@ -11,10 +11,37 @@ from ui import image_loader, track_utils, ui_utils
 from ui.widgets.track_row import TrackRow
 
 
+def _pick_primary_artist_name(artists: object) -> str | None:
+    if not artists:
+        return None
+    if isinstance(artists, str):
+        name = artists.strip()
+        return name or None
+    if not isinstance(artists, (list, tuple, set)):
+        artists = [artists]
+    for artist in artists:
+        if isinstance(artist, dict):
+            name = artist.get("name") or artist.get("sort_name")
+        else:
+            name = getattr(artist, "name", None) or getattr(
+                artist, "sort_name", None
+            )
+            if not name:
+                name = str(artist)
+        if isinstance(name, str):
+            name = name.strip()
+        if name:
+            return str(name)
+    return None
+
+
 def show_album_detail(app, album: dict) -> None:
     app.current_album = album
     album_name = get_album_name(album)
-    artists = album.get("artists") if isinstance(album, dict) else []
+    if isinstance(album, dict):
+        artists = album.get("artists")
+    else:
+        artists = getattr(album, "artists", None)
     artist_label = ui_utils.format_artist_names(artists or [])
     logger = logging.getLogger(__name__)
     if isinstance(album, dict):
@@ -38,6 +65,9 @@ def show_album_detail(app, album: dict) -> None:
         app.album_detail_title.set_label(album_name)
     if app.album_detail_artist:
         app.album_detail_artist.set_label(artist_label)
+    if app.album_detail_artist_button:
+        primary_artist = _pick_primary_artist_name(artists)
+        app.album_detail_artist_button.set_sensitive(bool(primary_artist))
     image_url = (
         image_loader.extract_album_image_url(album, app.server_url)
         if isinstance(album, dict)
@@ -248,6 +278,7 @@ def populate_track_table(app, tracks: list[dict]) -> None:
             artist=track.get("artist", ""),
             album=track.get("album", ""),
             quality=track.get("quality", ""),
+            is_favorite=bool(track.get("is_favorite", False)),
         )
         row.source = track.get("source")
         track_image_url = track.get("image_url") or track.get("cover_image_url")

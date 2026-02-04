@@ -48,12 +48,42 @@ def _serialize_album(client: MusicAssistantClient, album: object) -> dict:
             }
         )
     artists = []
-    for artist in getattr(album, "artists", []) or []:
-        artist_name = getattr(artist, "name", None) or getattr(
-            artist, "sort_name", None
-        )
-        if artist_name:
-            artists.append(artist_name)
+    if isinstance(album, dict):
+        raw_artists = album.get("artists")
+        if not raw_artists:
+            raw_artists = (
+                album.get("artist")
+                or album.get("artist_str")
+                or album.get("album_artist")
+                or album.get("album_artist_str")
+            )
+    else:
+        raw_artists = getattr(album, "artists", None)
+        if not raw_artists:
+            raw_artists = (
+                getattr(album, "artist", None)
+                or getattr(album, "artist_str", None)
+                or getattr(album, "album_artist", None)
+                or getattr(album, "album_artist_str", None)
+            )
+    if raw_artists:
+        if isinstance(raw_artists, str):
+            raw_artists = [raw_artists]
+        elif not isinstance(raw_artists, (list, tuple, set)):
+            raw_artists = [raw_artists]
+        for artist in raw_artists:
+            if isinstance(artist, dict):
+                artist_name = artist.get("name") or artist.get("sort_name")
+            else:
+                artist_name = getattr(artist, "name", None) or getattr(
+                    artist, "sort_name", None
+                )
+                if not artist_name and isinstance(artist, str):
+                    artist_name = artist
+            if artist_name:
+                cleaned = str(artist_name).strip()
+                if cleaned:
+                    artists.append(cleaned)
     image_url = None
     try:
         image_url = client.get_media_item_image_url(album)

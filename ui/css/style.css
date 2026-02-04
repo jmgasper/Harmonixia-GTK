@@ -67,10 +67,35 @@ separator {
   font-weight: 600;
 }
 
+.control-bar .now-playing-provider {
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+
+.control-bar .now-playing-provider-label {
+  color: #cbd5e1;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.control-bar .now-playing-provider-icon {
+  color: #cbd5e1;
+}
+
 .control-bar .now-playing-artist {
   color: #9aa4b2;
   font-size: 11px;
   font-weight: 500;
+}
+
+.control-bar .now-playing-quality {
+  color: #b5c0cf;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .control-bar button.now-playing-link {
@@ -208,6 +233,40 @@ scale slider {
 
 .sidebar-now-playing-art:active {
   border-color: #4a90e2;
+}
+
+.queue-controls button.queue-toggle {
+  background: transparent;
+  border: 1px solid #2a303a;
+  border-radius: 6px;
+  padding: 4px;
+  min-height: 28px;
+  color: #cbd5e1;
+}
+
+.queue-controls button.queue-toggle image {
+  color: #cbd5e1;
+}
+
+.queue-controls button.queue-toggle:hover {
+  background-color: #1f2530;
+  border-color: #3a4454;
+}
+
+.queue-controls button.queue-toggle:active {
+  background-color: #2b3442;
+}
+
+.queue-controls button.queue-toggle.off {
+  color: #6b7280;
+}
+
+.queue-controls button.queue-toggle.off image {
+  color: #6b7280;
+}
+
+.queue-controls button.queue-toggle:disabled {
+  opacity: 0.7;
 }
 
 .section-title {
@@ -393,6 +452,12 @@ progressbar progress {
   padding: 4px 0 0;
 }
 
+.search-scope-toggle label {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .search-grid {
   background-color: transparent;
 }
@@ -459,6 +524,42 @@ progressbar progress {
   font-size: 22px;
   font-weight: 700;
   color: #f8fafc;
+}
+
+.playlist-header-button {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 28px;
+  min-height: 28px;
+  color: #e2e8f0;
+}
+
+.playlist-header-button image {
+  color: #e2e8f0;
+}
+
+.playlist-header-button:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.playlist-header-button:active {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.playlist-header-button:disabled {
+  opacity: 0.55;
+}
+
+.playlist-delete-button:hover {
+  background-color: rgba(248, 113, 113, 0.18);
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.playlist-delete-button:hover image {
+  color: #fecaca;
 }
 
 .playlist-readonly-badge {
@@ -644,9 +745,10 @@ popover.output-popover > contents {
 }
 
 .artist-back {
-  background-color: #e2e8f0;
-  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
+  border: 1px solid #d1d5db;
   border-radius: 6px;
+  box-shadow: none;
   padding: 6px 10px;
   color: #0f172a;
 }
@@ -658,7 +760,8 @@ popover.output-popover > contents {
 }
 
 .artist-back:hover {
-  background-color: #dbe2ea;
+  background-color: #e2e8f0;
+  border-color: #cbd5e1;
 }
 
 .detail-art {
@@ -678,7 +781,29 @@ popover.output-popover > contents {
   font-size: 13px;
 }
 
-.detail-play.suggested-action {
+.album-detail button.detail-artist-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  min-width: 0;
+  min-height: 0;
+  cursor: pointer;
+}
+
+.album-detail button.detail-artist-link:hover label {
+  text-decoration: underline;
+}
+
+.album-detail button.detail-artist-link:disabled {
+  cursor: default;
+}
+
+.album-detail button.detail-artist-link:disabled label {
+  text-decoration: none;
+  opacity: 0.7;
+}
+
+.detail-play {
   padding: 6px;
   min-width: 36px;
   min-height: 32px;
@@ -780,6 +905,12 @@ columnview.track-table listview listitem:hover {
 
 .playing-indicator {
   color: #16a34a;
+}
+
+.track-art {
+  background-color: rgba(226, 232, 240, 0.6);
+  border-radius: 4px;
+  box-shadow: none;
 }
 
 .artist-list {

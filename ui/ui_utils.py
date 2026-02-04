@@ -74,11 +74,12 @@ def configure_media_flowbox(
     max_children_per_line: int = 6,
     column_spacing: int = 16,
     row_spacing: int = 16,
+    homogeneous: bool = True,
     css_class: str | None = "search-grid",
 ) -> None:
     if css_class:
         flow.add_css_class(css_class)
-    flow.set_homogeneous(True)
+    flow.set_homogeneous(homogeneous)
     flow.set_min_children_per_line(min_children_per_line)
     flow.set_max_children_per_line(max_children_per_line)
     flow.set_selection_mode(selection_mode)

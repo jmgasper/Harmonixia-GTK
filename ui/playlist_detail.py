@@ -55,17 +55,61 @@ def build_playlist_detail_section(app) -> Gtk.Widget:
     title.add_css_class("playlist-detail-title")
     title.set_wrap(True)
     title.set_ellipsize(Pango.EllipsizeMode.END)
-    title.set_hexpand(True)
+
+    rename_icon_name = app.pick_icon_name(
+        [
+            "document-edit-symbolic",
+            "edit-symbolic",
+            "accessories-text-editor-symbolic",
+        ]
+    )
+    rename_button = Gtk.Button()
+    rename_button.add_css_class("playlist-header-button")
+    rename_button.set_tooltip_text("Rename playlist")
+    rename_icon = Gtk.Image.new_from_icon_name(rename_icon_name)
+    rename_icon.set_pixel_size(16)
+    rename_button.set_child(rename_icon)
+    rename_button.set_valign(Gtk.Align.CENTER)
+    rename_button.set_sensitive(False)
+    rename_button.connect(
+        "clicked", lambda button: playlist_manager.on_playlist_rename_clicked(app, button)
+    )
+
+    read_only_badge = Gtk.Label(label="Read-only")
+    read_only_badge.add_css_class("playlist-readonly-badge")
+    read_only_badge.set_visible(False)
 
     title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     title_row.set_hexpand(True)
     title_row.set_halign(Gtk.Align.FILL)
     title_row.append(title)
-
-    read_only_badge = Gtk.Label(label="Read-only")
-    read_only_badge.add_css_class("playlist-readonly-badge")
-    read_only_badge.set_visible(False)
+    title_row.append(rename_button)
     title_row.append(read_only_badge)
+
+    delete_icon_name = app.pick_icon_name(
+        ["user-trash-symbolic", "edit-delete-symbolic", "user-trash"]
+    )
+    delete_button = Gtk.Button()
+    delete_button.add_css_class("playlist-header-button")
+    delete_button.add_css_class("playlist-delete-button")
+    delete_button.set_tooltip_text("Delete playlist")
+    delete_icon = Gtk.Image.new_from_icon_name(delete_icon_name)
+    delete_icon.set_pixel_size(16)
+    delete_button.set_child(delete_icon)
+    delete_button.set_valign(Gtk.Align.START)
+    delete_button.set_sensitive(False)
+    delete_button.connect(
+        "clicked", lambda button: playlist_manager.on_playlist_delete_clicked(app, button)
+    )
+
+    title_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    title_bar.set_hexpand(True)
+    title_bar.set_halign(Gtk.Align.FILL)
+    title_bar.append(title_row)
+    title_bar.append(delete_button)
+
+    controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    controls_row.set_halign(Gtk.Align.START)
 
     play_button = Gtk.Button()
     play_button.add_css_class("suggested-action")
@@ -78,11 +122,26 @@ def build_playlist_detail_section(app) -> Gtk.Widget:
     play_button.set_sensitive(False)
     play_button.set_visible(False)
     play_button.connect("clicked", app.on_playlist_play_clicked)
-    title_row.append(play_button)
+    controls_row.append(play_button)
+
+    shuffle_icon_name = app.pick_icon_name(
+        ["media-playlist-shuffle-symbolic", "media-playlist-shuffle"]
+    )
+    shuffle_button = Gtk.Button()
+    shuffle_button.add_css_class("detail-play")
+    shuffle_button.set_halign(Gtk.Align.START)
+    shuffle_button.set_tooltip_text("Shuffle play")
+    shuffle_icon = Gtk.Image.new_from_icon_name(shuffle_icon_name)
+    shuffle_icon.set_pixel_size(18)
+    shuffle_button.set_child(shuffle_icon)
+    shuffle_button.set_sensitive(False)
+    shuffle_button.set_visible(False)
+    shuffle_button.connect("clicked", app.on_playlist_shuffle_clicked)
+    controls_row.append(shuffle_button)
 
     info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    info.append(title_row)
-    info.append(playlist_manager.build_playlist_action_row(app))
+    info.append(title_bar)
+    info.append(controls_row)
 
     header.append(art)
     header.append(info)
@@ -107,6 +166,7 @@ def build_playlist_detail_section(app) -> Gtk.Widget:
         selection_attr="playlist_tracks_selection",
         view_attr="playlist_tracks_view",
         action_labels=("Play", "Remove from this playlist"),
+        use_track_art=True,
     )
     tracks_scroller = Gtk.ScrolledWindow()
     tracks_scroller.set_policy(
@@ -126,5 +186,8 @@ def build_playlist_detail_section(app) -> Gtk.Widget:
     app.playlist_detail_title = title
     app.playlist_detail_status_label = status
     app.playlist_detail_play_button = play_button
+    app.playlist_detail_shuffle_button = shuffle_button
     app.playlist_detail_read_only_badge = read_only_badge
+    app.playlist_detail_rename_button = rename_button
+    app.playlist_detail_delete_button = delete_button
     return overlay

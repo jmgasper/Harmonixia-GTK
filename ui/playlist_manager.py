@@ -836,7 +836,7 @@ def on_track_added_to_playlist(
     set_playlists_status(app, f"Added to {playlist_name}.")
     current = app.current_playlist
     if current and _playlist_id_matches(current, playlist_id):
-        app.load_playlist_tracks(current)
+        app.load_playlist_tracks(current, force_refresh=True)
 
 
 def _get_track_uri(track) -> str | None:

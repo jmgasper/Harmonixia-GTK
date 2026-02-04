@@ -212,6 +212,13 @@ def on_album_activated(
 def populate_album_flow(app, albums: list) -> None:
     if not app.albums_flow:
         return
+    visible_view = None
+    if app.main_stack:
+        try:
+            visible_view = app.main_stack.get_visible_child_name()
+        except Exception:
+            visible_view = None
+    load_art = visible_view == "albums" if visible_view is not None else True
     ui_utils.clear_container(app.albums_flow)
     for album in albums:
         image_url = None
@@ -238,6 +245,7 @@ def populate_album_flow(app, albums: list) -> None:
             artist,
             image_url,
             art_size=MEDIA_TILE_SIZE,
+            load_art=load_art,
         )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
@@ -248,3 +256,29 @@ def populate_album_flow(app, albums: list) -> None:
         child.set_size_request(MEDIA_TILE_SIZE, -1)
         child.album_data = album_data
         app.albums_flow.append(child)
+
+
+def ensure_album_grid_artwork(app) -> None:
+    flow = app.albums_flow
+    if not flow:
+        return
+    child = flow.get_first_child()
+    while child:
+        album = getattr(child, "album_data", None)
+        card = child.get_child()
+        art = card.get_first_child() if card else None
+        if isinstance(art, Gtk.Picture) and art.get_paintable() is None:
+            image_url = image_loader.extract_album_image_url(
+                album,
+                app.server_url,
+            )
+            if image_url:
+                image_loader.load_album_art_async(
+                    art,
+                    image_url,
+                    MEDIA_TILE_SIZE,
+                    app.auth_token,
+                    app.image_executor,
+                    app.get_cache_dir(),
+                )
+        child = child.get_next_sibling()

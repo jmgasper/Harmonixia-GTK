@@ -18,3 +18,4 @@ class TrackRow(GObject.GObject):
     album = GObject.Property(type=str, default="")
     quality = GObject.Property(type=str, default="")
     is_playing = GObject.Property(type=bool, default=False)
+    is_favorite = GObject.Property(type=bool, default=False)

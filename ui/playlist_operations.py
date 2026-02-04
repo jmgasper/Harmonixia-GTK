@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from collections import OrderedDict
 
 from gi.repository import GLib
 
@@ -20,6 +21,57 @@ from ui.widgets.track_row import TrackRow
 EMPTY_PLAYLIST_MESSAGE = (
     "Add songs to the playlist to have them display here"
 )
+PLAYLIST_TRACKS_CACHE_LIMIT = 12
+
+
+def _get_playlist_tracks_cache(app) -> OrderedDict:
+    cache = getattr(app, "playlist_tracks_cache", None)
+    if cache is None:
+        cache = OrderedDict()
+        app.playlist_tracks_cache = cache
+    return cache
+
+
+def _get_playlist_tracks_inflight(app) -> set:
+    inflight = getattr(app, "playlist_tracks_inflight", None)
+    if inflight is None:
+        inflight = set()
+        app.playlist_tracks_inflight = inflight
+    return inflight
+
+
+def _get_playlist_request_ids(app) -> dict:
+    request_ids = getattr(app, "playlist_tracks_request_ids", None)
+    if request_ids is None:
+        request_ids = {}
+        app.playlist_tracks_request_ids = request_ids
+    return request_ids
+
+
+def _make_playlist_cache_key(
+    app, item_id: str, provider: str
+) -> tuple[str, str, str]:
+    return (app.server_url or "", str(item_id), str(provider))
+
+
+def _get_cached_playlist_tracks(
+    app, cache_key: tuple[str, str, str]
+) -> list[dict] | None:
+    cache = _get_playlist_tracks_cache(app)
+    tracks = cache.get(cache_key)
+    if tracks is not None:
+        cache.move_to_end(cache_key)
+    return tracks
+
+
+def _store_playlist_tracks_cache(
+    app, cache_key: tuple[str, str, str], tracks: list[dict]
+) -> None:
+    cache = _get_playlist_tracks_cache(app)
+    cache[cache_key] = tracks
+    cache.move_to_end(cache_key)
+    while len(cache) > PLAYLIST_TRACKS_CACHE_LIMIT:
+        cache.popitem(last=False)
 
 
 def show_playlist_detail(app, playlist: dict) -> None:
@@ -30,7 +82,6 @@ def show_playlist_detail(app, playlist: dict) -> None:
         app.playlist_detail_title.set_label(name)
     set_playlist_editable_state(app, playlist)
     clear_playlist_detail_art(app)
-    populate_playlist_track_table(app, [])
     load_playlist_tracks(app, playlist)
 
 
@@ -54,26 +105,43 @@ def set_playlist_editable_state(app, playlist: dict) -> None:
 
 
 def update_playlist_play_button(app) -> None:
-    button = getattr(app, "playlist_detail_play_button", None)
-    if not button:
-        return
     can_play = bool(app.current_album_tracks) and bool(app.server_url)
-    button.set_sensitive(can_play)
-    button.set_visible(can_play)
+    button = getattr(app, "playlist_detail_play_button", None)
+    if button:
+        button.set_sensitive(can_play)
+        button.set_visible(can_play)
+    shuffle_button = getattr(app, "playlist_detail_shuffle_button", None)
+    if shuffle_button:
+        shuffle_button.set_sensitive(can_play)
+        shuffle_button.set_visible(can_play)
 
 
-def on_playlist_play_clicked(app, _button) -> None:
+def _start_playlist_playback(app) -> bool:
     if not app.server_url or not app.current_album_tracks:
-        return
+        return False
     app.playback_album = app.current_album
     app.playback_album_tracks = [
         track_utils.snapshot_track(item, track_utils.get_track_identity)
         for item in app.current_album_tracks
     ]
     app.start_playback_from_index(0, reset_queue=True)
+    return True
 
 
-def load_playlist_tracks(app, playlist: dict) -> None:
+def on_playlist_play_clicked(app, _button) -> None:
+    _start_playlist_playback(app)
+
+
+def on_playlist_shuffle_clicked(app, _button) -> None:
+    if not _start_playlist_playback(app):
+        return
+    if hasattr(app, "set_shuffle_enabled"):
+        app.set_shuffle_enabled(True)
+
+
+def load_playlist_tracks(
+    app, playlist: dict, force_refresh: bool = False
+) -> None:
     if not app.server_url:
         populate_playlist_track_table(app, [])
         set_playlist_detail_status(
@@ -91,17 +159,39 @@ def load_playlist_tracks(app, playlist: dict) -> None:
         )
         return
 
-    set_playlist_detail_status(app, "Loading tracks...")
+    cache_key = _make_playlist_cache_key(app, item_id, provider)
+    cached_tracks = _get_cached_playlist_tracks(app, cache_key)
+    if cached_tracks:
+        update_playlist_detail_art(app, cached_tracks)
+        populate_playlist_track_table(app, cached_tracks)
+        set_playlist_detail_status(app, "")
+    else:
+        populate_playlist_track_table(app, [])
+        set_playlist_detail_status(app, "Loading tracks...")
+
+    inflight = _get_playlist_tracks_inflight(app)
+    if cache_key in inflight and not force_refresh:
+        return
+    inflight.discard(cache_key)
+    inflight.add(cache_key)
+    request_ids = _get_playlist_request_ids(app)
+    request_id = request_ids.get(cache_key, 0) + 1
+    request_ids[cache_key] = request_id
     thread = threading.Thread(
         target=app._load_playlist_tracks_worker,
-        args=(playlist, item_id, provider),
+        args=(playlist, item_id, provider, cache_key, request_id),
         daemon=True,
     )
     thread.start()
 
 
 def _load_playlist_tracks_worker(
-    app, playlist: dict, item_id: str, provider: str
+    app,
+    playlist: dict,
+    item_id: str,
+    provider: str,
+    cache_key: tuple[str, str, str],
+    request_id: int,
 ) -> None:
     error = ""
     tracks: list[dict] = []
@@ -126,7 +216,14 @@ def _load_playlist_tracks_worker(
         error = str(exc)
     except Exception as exc:
         error = str(exc)
-    GLib.idle_add(app.on_playlist_tracks_loaded, playlist, tracks, error)
+    GLib.idle_add(
+        app.on_playlist_tracks_loaded,
+        playlist,
+        tracks,
+        error,
+        cache_key,
+        request_id,
+    )
 
 
 async def _fetch_playlist_tracks_async(
@@ -182,6 +279,13 @@ async def _fetch_playlist_tracks_async(
             describe_quality,
         )
         payload["track_number"] = index
+        image_url = image_loader.resolve_media_item_image_url(
+            client,
+            track,
+            app.server_url,
+        )
+        if image_url:
+            payload["image_url"] = image_url
         if index <= len(cover_urls):
             payload["cover_image_url"] = cover_urls[index - 1]
         serialized.append(payload)
@@ -211,6 +315,13 @@ async def fetch_track_album_cover_url(
     track: object,
     server_url: str,
 ) -> str | None:
+    direct = image_loader.resolve_media_item_image_url(
+        client,
+        track,
+        server_url,
+    )
+    if direct:
+        return direct
     candidates = get_track_album_candidates(track)
     for album_id, album_provider in candidates:
         try:
@@ -284,8 +395,21 @@ def get_track_album_candidates(track: object) -> list[tuple[str, str]]:
 
 
 def on_playlist_tracks_loaded(
-    app, playlist: dict, tracks: list[dict], error: str
+    app,
+    playlist: dict,
+    tracks: list[dict],
+    error: str,
+    cache_key: tuple[str, str, str] | None = None,
+    request_id: int | None = None,
 ) -> None:
+    if cache_key is not None:
+        inflight = getattr(app, "playlist_tracks_inflight", None)
+        if inflight:
+            inflight.discard(cache_key)
+        if request_id is not None:
+            current_request_id = _get_playlist_request_ids(app).get(cache_key)
+            if current_request_id is not None and request_id != current_request_id:
+                return
     if not app.is_same_album(playlist, app.current_playlist):
         return
     logging.getLogger(__name__).debug(
@@ -299,12 +423,18 @@ def on_playlist_tracks_loaded(
             get_playlist_name(playlist),
             error,
         )
-        populate_playlist_track_table(app, [])
+        if (
+            app.playlist_tracks_store
+            and app.playlist_tracks_store.get_n_items() == 0
+        ):
+            populate_playlist_track_table(app, [])
         set_playlist_detail_status(app, f"Unable to load tracks: {error}")
         return
 
-    populate_playlist_track_table(app, tracks)
+    if cache_key is not None:
+        _store_playlist_tracks_cache(app, cache_key, tracks)
     update_playlist_detail_art(app, tracks)
+    populate_playlist_track_table(app, tracks)
     if tracks:
         set_playlist_detail_status(app, "")
     else:
@@ -326,11 +456,22 @@ def populate_playlist_track_table(app, tracks: list[dict]) -> None:
             artist=track.get("artist", ""),
             album=track.get("album", ""),
             quality=track.get("quality", ""),
+            is_favorite=bool(track.get("is_favorite", False)),
         )
         row.source = track.get("source")
         cover_image_url = track.get("cover_image_url")
         if cover_image_url:
             row.cover_image_url = cover_image_url
+        track_image_url = track.get("image_url") or cover_image_url
+        if not track_image_url:
+            source = track.get("source")
+            if source is not None:
+                track_image_url = image_loader.extract_media_image_url(
+                    source,
+                    app.server_url,
+                )
+        if track_image_url:
+            row.image_url = track_image_url
         app.playlist_tracks_store.append(row)
         app.current_album_tracks.append(row)
     if app.playlist_tracks_view and app.playlist_tracks_selection:
@@ -396,7 +537,7 @@ def collect_playlist_cover_urls(
         if seen_tracks >= limit:
             break
         seen_tracks += 1
-        image_url = track.get("cover_image_url")
+        image_url = track.get("cover_image_url") or track.get("image_url")
         if not image_url:
             source = track.get("source")
             if source is not None:
@@ -503,7 +644,7 @@ def on_track_removed_from_playlist(
     set_playlist_detail_status(app, f"Removed from {playlist_name}.")
     current = app.current_playlist
     if current and _playlist_id_matches(current, playlist_id):
-        app.load_playlist_tracks(current)
+        app.load_playlist_tracks(current, force_refresh=True)
 
 
 def get_playlist_name(playlist: object) -> str:

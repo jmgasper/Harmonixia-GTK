@@ -71,9 +71,8 @@ async def resolve_player_and_queue(
 
 async def _play_album_async(
     client: MusicAssistantClient,
-    track_uri: str,
-    album_media: list[str],
-    start_index: int,
+    media: object,
+    start_item: object | None,
     preferred_player_id: str | None,
 ) -> str:
     player_id, queue_id = await resolve_player_and_queue(
@@ -85,27 +84,12 @@ async def _play_album_async(
             queue_id,
             player_id,
         )
-    if album_media:
-        if start_index:
-            await client.player_queues.clear(queue_id)
-            await client.player_queues.play_media(
-                queue_id,
-                album_media,
-                option=QueueOption.ADD,
-            )
-            await client.player_queues.play_index(queue_id, start_index)
-        else:
-            await client.player_queues.play_media(
-                queue_id,
-                album_media,
-                option=QueueOption.REPLACE,
-            )
-    else:
-        await client.player_queues.play_media(
-            queue_id,
-            track_uri,
-            option=QueueOption.REPLACE,
-        )
+    await client.player_queues.play_media(
+        queue_id,
+        media,
+        option=QueueOption.REPLACE,
+        start_item=start_item,
+    )
     if os.getenv("SENDSPIN_DEBUG"):
         queue = None
         try:
@@ -125,18 +109,16 @@ def play_album(
     client_session,
     server_url: str,
     auth_token: str,
-    track_uri: str,
-    album_media: list[str],
-    start_index: int,
+    media: object,
+    start_item: object | None,
     preferred_player_id: str | None,
 ) -> str:
     return client_session.run(
         server_url,
         auth_token,
         _play_album_async,
-        track_uri,
-        album_media,
-        start_index,
+        media,
+        start_item,
         preferred_player_id,
     )
 
@@ -147,19 +129,86 @@ async def _playback_command_async(
     preferred_player_id: str | None,
     position: int | None,
 ) -> None:
+    if preferred_player_id:
+        try:
+            await _send_player_command(
+                client,
+                command,
+                preferred_player_id,
+                position,
+            )
+            return
+        except MusicAssistantClientException as exc:
+            if os.getenv("SENDSPIN_DEBUG"):
+                logging.getLogger(__name__).info(
+                    "Playback command fast-path failed for %s: %s",
+                    preferred_player_id,
+                    exc,
+                )
+    player_id, _queue_id = await resolve_player_and_queue(
+        client, preferred_player_id
+    )
+    await _send_player_command(client, command, player_id, position)
+
+
+async def _send_player_command(
+    client: MusicAssistantClient,
+    command: str,
+    player_id: str,
+    position: int | None,
+) -> None:
+    if command == "pause":
+        await client.players.pause(player_id)
+    elif command in ("play", "resume"):
+        await client.players.play(player_id)
+    elif command == "next":
+        await client.players.next_track(player_id)
+    elif command == "previous":
+        await client.players.previous_track(player_id)
+    elif command == "stop":
+        await client.players.stop(player_id)
+    elif command == "seek" and position is not None:
+        await client.players.seek(player_id, position)
+
+
+def _coerce_repeat_mode(value: object):
+    try:
+        from music_assistant_models.enums import RepeatMode
+    except Exception:
+        return value
+    if isinstance(value, RepeatMode):
+        return value
+    if isinstance(value, str):
+        text = value.casefold()
+        if text in ("off", "none", "disabled"):
+            return RepeatMode.OFF
+        if text in ("one", "track", "single"):
+            return RepeatMode.ONE
+        if text in ("all", "playlist"):
+            return RepeatMode.ALL
+    return value
+
+
+async def _set_repeat_mode_async(
+    client: MusicAssistantClient,
+    repeat_mode: object,
+    preferred_player_id: str | None,
+) -> None:
     _player_id, queue_id = await resolve_player_and_queue(
         client, preferred_player_id
     )
-    if command == "pause":
-        await client.player_queues.pause(queue_id)
-    elif command == "resume":
-        await client.player_queues.resume(queue_id)
-    elif command == "next":
-        await client.player_queues.next(queue_id)
-    elif command == "previous":
-        await client.player_queues.previous(queue_id)
-    elif command == "seek" and position is not None:
-        await client.player_queues.seek(queue_id, position)
+    await client.player_queues.repeat(queue_id, _coerce_repeat_mode(repeat_mode))
+
+
+async def _set_shuffle_async(
+    client: MusicAssistantClient,
+    enabled: bool,
+    preferred_player_id: str | None,
+) -> None:
+    _player_id, queue_id = await resolve_player_and_queue(
+        client, preferred_player_id
+    )
+    await client.player_queues.shuffle(queue_id, bool(enabled))
 
 
 async def _play_index_async(
@@ -171,6 +220,45 @@ async def _play_index_async(
         client, preferred_player_id
     )
     await client.player_queues.play_index(queue_id, int(index))
+
+
+async def _transfer_queue_async(
+    client: MusicAssistantClient,
+    source_player_id: str,
+    target_player_id: str,
+    auto_play: bool | None,
+) -> None:
+    await client.players.fetch_state()
+    await client.player_queues.fetch_state()
+    source_player = client.players.get(source_player_id)
+    target_player = client.players.get(target_player_id)
+    if not source_player:
+        raise MusicAssistantClientException(
+            f"Source output unavailable: {source_player_id}"
+        )
+    if not target_player:
+        raise MusicAssistantClientException(
+            f"Target output unavailable: {target_player_id}"
+        )
+    source_queue = await client.player_queues.get_active_queue(
+        source_player_id
+    )
+    target_queue = await client.player_queues.get_active_queue(
+        target_player_id
+    )
+    source_queue_id = (
+        source_queue.queue_id if source_queue else source_player_id
+    )
+    target_queue_id = (
+        target_queue.queue_id if target_queue else target_player_id
+    )
+    if source_queue_id == target_queue_id:
+        return
+    await client.player_queues.transfer(
+        source_queue_id,
+        target_queue_id,
+        auto_play=auto_play,
+    )
 
 
 def send_playback_command(
@@ -188,6 +276,56 @@ def send_playback_command(
         command,
         preferred_player_id,
         position,
+    )
+
+
+def set_queue_repeat_mode(
+    client_session,
+    server_url: str,
+    auth_token: str,
+    repeat_mode: object,
+    preferred_player_id: str | None,
+) -> None:
+    client_session.run(
+        server_url,
+        auth_token,
+        _set_repeat_mode_async,
+        repeat_mode,
+        preferred_player_id,
+    )
+
+
+def set_queue_shuffle(
+    client_session,
+    server_url: str,
+    auth_token: str,
+    enabled: bool,
+    preferred_player_id: str | None,
+) -> None:
+    client_session.run(
+        server_url,
+        auth_token,
+        _set_shuffle_async,
+        enabled,
+        preferred_player_id,
+    )
+
+
+def transfer_queue(
+    client_session,
+    server_url: str,
+    auth_token: str,
+    source_player_id: str,
+    target_player_id: str,
+    auto_play: bool | None = None,
+) -> None:
+    client_session.run(
+        server_url,
+        auth_token,
+        _transfer_queue_async,
+        source_player_id,
+        target_player_id,
+        auto_play,
     )
 
 
@@ -215,6 +353,22 @@ async def _volume_command_async(
     await client.players.volume_set(player_id, volume)
 
 
+async def _volume_step_async(
+    client: MusicAssistantClient,
+    player_id: str,
+    direction: int,
+    steps: int,
+) -> None:
+    if direction == 0 or steps <= 0:
+        return
+    if direction > 0:
+        for _ in range(steps):
+            await client.players.volume_up(player_id)
+    else:
+        for _ in range(steps):
+            await client.players.volume_down(player_id)
+
+
 def set_player_volume(
     client_session,
     server_url: str,
@@ -231,11 +385,35 @@ def set_player_volume(
     )
 
 
+def step_player_volume(
+    client_session,
+    server_url: str,
+    auth_token: str,
+    player_id: str,
+    direction: int,
+    steps: int,
+) -> None:
+    if direction == 0 or steps <= 0:
+        return
+    client_session.run(
+        server_url,
+        auth_token,
+        _volume_step_async,
+        player_id,
+        direction,
+        steps,
+    )
+
+
 __all__ = [
     "play_album",
     "play_index",
     "send_playback_command",
+    "set_queue_repeat_mode",
+    "set_queue_shuffle",
+    "transfer_queue",
     "set_player_volume",
+    "step_player_volume",
     "resolve_player_and_queue",
     "build_media_uri_list",
 ]
