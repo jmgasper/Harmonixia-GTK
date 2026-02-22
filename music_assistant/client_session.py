@@ -19,7 +19,8 @@ class ClientSession:
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self._thread_lock = threading.Lock()
-        self._operation_lock: asyncio.Lock | None = None
+        self._connection_lock: asyncio.Lock | None = None
+        self._request_lock: asyncio.Lock | None = None
         self._client: MusicAssistantClient | None = None
         self._client_cm: MusicAssistantClient | None = None
         self._server_url = ""
@@ -29,7 +30,8 @@ class ClientSession:
     def _run_loop(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        self._operation_lock = asyncio.Lock()
+        self._connection_lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
         self._loop = loop
         self._ready.set()
         loop.run_forever()
@@ -111,10 +113,13 @@ class ClientSession:
         *args: object,
         **kwargs: object,
     ) -> T:
-        if self._operation_lock is None:
-            self._operation_lock = asyncio.Lock()
-        async with self._operation_lock:
-            client = await self._ensure_client(server_url, auth_token)
+        if self._connection_lock is None:
+            self._connection_lock = asyncio.Lock()
+        if self._request_lock is None:
+            self._request_lock = asyncio.Lock()
+        async with self._request_lock:
+            async with self._connection_lock:
+                client = await self._ensure_client(server_url, auth_token)
             try:
                 return await coro_func(client, *args, **kwargs)
             except Exception as exc:
@@ -123,15 +128,18 @@ class ClientSession:
                     self._logger.debug(
                         "Client session disconnected; resetting connection."
                     )
-                    await self._close_client()
+                    async with self._connection_lock:
+                        await self._close_client()
                 if not self._should_retry_on_disconnect(exc):
                     raise
                 try:
-                    client = await self._ensure_client(server_url, auth_token)
+                    async with self._connection_lock:
+                        client = await self._ensure_client(server_url, auth_token)
                     return await coro_func(client, *args, **kwargs)
                 except Exception as retry_exc:
                     if self._is_connection_error(retry_exc):
-                        await self._close_client()
+                        async with self._connection_lock:
+                            await self._close_client()
                     raise
 
     async def _set_server_async(
@@ -139,18 +147,18 @@ class ClientSession:
         server_url: str,
         auth_token: str,
     ) -> None:
-        if self._operation_lock is None:
-            self._operation_lock = asyncio.Lock()
-        async with self._operation_lock:
+        if self._connection_lock is None:
+            self._connection_lock = asyncio.Lock()
+        async with self._connection_lock:
             if not server_url:
                 await self._close_client()
                 return
             await self._ensure_client(server_url, auth_token)
 
     async def _shutdown(self) -> None:
-        if self._operation_lock is None:
-            self._operation_lock = asyncio.Lock()
-        async with self._operation_lock:
+        if self._connection_lock is None:
+            self._connection_lock = asyncio.Lock()
+        async with self._connection_lock:
             await self._close_client()
 
     async def _ensure_client(

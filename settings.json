@@ -4,8 +4,8 @@
   "eq_selected_preset": "focal:celestee::autoeq_rtings",
   "output_alsa_device": "",
   "output_backend": "pulse",
-  "output_local_output_id": "112",
-  "output_player_id": "ma_gtk_c6d250713a",
+  "output_local_output_id": null,
+  "output_player_id": "ma_gtk_f6058816f8",
   "output_pulse_device": "alsa_output.usb-SMSL_SMSL_USB_AUDIO-00.iec958-stereo",
   "server_url": "http://192.168.1.29:8095"
 }

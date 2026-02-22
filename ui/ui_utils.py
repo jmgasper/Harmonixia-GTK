@@ -62,8 +62,47 @@ def apply_css(css_path: str) -> None:
 def clear_container(container: Gtk.Widget) -> None:
     child = container.get_first_child()
     while child:
+        detach_context_popovers(child)
         container.remove(child)
         child = container.get_first_child()
+
+
+def detach_context_popover(widget: Gtk.Widget) -> None:
+    popover = getattr(widget, "context_popover", None)
+    if popover is None:
+        return
+    try:
+        popover.popdown()
+    except Exception:
+        pass
+    try:
+        if popover.get_parent() is widget:
+            popover.unparent()
+    except Exception:
+        pass
+    widget.context_popover = None
+
+
+def detach_context_popovers(widget: Gtk.Widget) -> None:
+    stack = [widget]
+    while stack:
+        current = stack.pop()
+        detach_context_popover(current)
+        child = current.get_first_child()
+        while child is not None:
+            stack.append(child)
+            child = child.get_next_sibling()
+
+
+def attach_context_popover(anchor: Gtk.Widget, popover: Gtk.Popover) -> None:
+    popover.set_parent(anchor)
+    anchor.context_popover = popover
+
+    def _on_parent_changed(widget: Gtk.Widget, _pspec: object) -> None:
+        if widget.get_parent() is None:
+            detach_context_popover(widget)
+
+    anchor.connect("notify::parent", _on_parent_changed)
 
 
 def configure_media_flowbox(
@@ -149,14 +188,92 @@ def get_gtk_environment_info() -> tuple[str, str]:
     return version, theme_name
 
 
-def make_artist_row(name: str, artist_data: object | None = None) -> Gtk.ListBoxRow:
+def make_artist_row(
+    name: str,
+    artist_data: object | None = None,
+    image_url: str | None = None,
+    app=None,
+) -> Gtk.ListBoxRow:
     row = Gtk.ListBoxRow()
     row.add_css_class("artist-row")
 
+    content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    content.set_halign(Gtk.Align.FILL)
+    content.set_hexpand(True)
+
+    avatar = Gtk.Picture()
+    avatar.add_css_class("artist-avatar")
+    avatar.set_size_request(32, 32)
+    avatar.set_halign(Gtk.Align.START)
+    avatar.set_valign(Gtk.Align.CENTER)
+    avatar.set_can_shrink(True)
+    if hasattr(avatar, "set_content_fit") and hasattr(Gtk, "ContentFit"):
+        avatar.set_content_fit(Gtk.ContentFit.COVER)
+    elif hasattr(avatar, "set_keep_aspect_ratio"):
+        avatar.set_keep_aspect_ratio(False)
+
     label = Gtk.Label(label=name, xalign=0)
     label.set_ellipsize(Pango.EllipsizeMode.END)
+    label.set_hexpand(True)
     label.set_margin_top(2)
     label.set_margin_bottom(2)
-    row.set_child(label)
+    label.set_valign(Gtk.Align.CENTER)
+
+    content.append(avatar)
+    content.append(label)
+    row.set_child(content)
     row.artist_data = artist_data if artist_data is not None else name
+    row.artist_avatar = avatar
+
+    if image_url and app is not None:
+        from ui import image_loader
+
+        image_loader.load_album_art_async(
+            avatar,
+            image_url,
+            32,
+            app.auth_token,
+            app.image_executor,
+            app.get_cache_dir(),
+        )
+
+    if app is not None and hasattr(app, "on_artist_row_context_action"):
+        popover = Gtk.Popover()
+        popover.set_has_arrow(False)
+        popover.add_css_class("track-action-popover")
+        action_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        action_box.set_margin_start(6)
+        action_box.set_margin_end(6)
+        action_box.set_margin_top(6)
+        action_box.set_margin_bottom(6)
+        for action in ("View Albums", "Start Radio"):
+            action_button = Gtk.Button(label=action)
+            action_button.set_halign(Gtk.Align.FILL)
+            action_button.set_hexpand(True)
+            action_button.add_css_class("track-action-item")
+            action_button.connect(
+                "clicked",
+                app.on_artist_row_context_action,
+                popover,
+                action,
+                row.artist_data,
+            )
+            action_box.append(action_button)
+        popover.set_child(action_box)
+        attach_context_popover(row, popover)
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(3)
+
+        def on_pressed(_gesture, _n_press: int, x: float, y: float) -> None:
+            if hasattr(popover, "set_pointing_to"):
+                rect = Gdk.Rectangle()
+                rect.x = int(x)
+                rect.y = int(y)
+                rect.width = 1
+                rect.height = 1
+                popover.set_pointing_to(rect)
+            popover.popup()
+
+        gesture.connect("pressed", on_pressed)
+        row.add_controller(gesture)
     return row

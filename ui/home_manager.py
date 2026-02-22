@@ -8,26 +8,31 @@ from constants import HOME_ALBUM_ART_SIZE, HOME_LIST_LIMIT
 from music_assistant import library
 from music_assistant_client import MusicAssistantClient
 from music_assistant_models.enums import MediaType
-from ui import album_grid, home_section, image_loader, ui_utils
+from ui import album_grid, home_section, image_loader, track_utils, ui_utils
+from ui.widgets.track_row import TrackRow
 
 
 def refresh_home_sections(app) -> None:
     app.refresh_home_recently_played()
+    app.refresh_home_recently_played_tracks()
     app.refresh_home_recently_added()
     app.refresh_home_recommendations()
 
 
 def clear_home_recent_lists(app) -> None:
     app.home_recently_played_loading = False
+    app.home_recently_played_tracks_loading = False
     app.home_recently_added_loading = False
     app.home_recommendations_loading = False
     if app.home_recently_played_refresh_id is not None:
         GLib.source_remove(app.home_recently_played_refresh_id)
         app.home_recently_played_refresh_id = None
     home_section.populate_home_album_list(app, app.home_recently_played_list, [])
+    _populate_home_recent_tracks(app, [])
     home_section.populate_home_album_list(app, app.home_recently_added_list, [])
     home_section.populate_home_recommendations(app, [])
     home_section.update_home_status(app.home_recently_played_status, [])
+    home_section.update_home_status(app.home_recent_tracks_status, [])
     home_section.update_home_status(app.home_recently_added_status, [])
     home_section.update_home_status(app.home_recommendations_status, [])
 
@@ -64,6 +69,30 @@ def refresh_home_recently_played(app) -> None:
     )
     thread = threading.Thread(
         target=app._load_recently_played_worker,
+        daemon=True,
+    )
+    thread.start()
+
+
+def refresh_home_recently_played_tracks(app) -> None:
+    if not getattr(app, "home_recent_tracks_store", None):
+        return
+    if not app.server_url:
+        _populate_home_recent_tracks(app, [])
+        home_section.set_home_status(
+            app.home_recent_tracks_status,
+            "Connect to your Music Assistant server to load recently played tracks.",
+        )
+        return
+    if getattr(app, "home_recently_played_tracks_loading", False):
+        return
+    app.home_recently_played_tracks_loading = True
+    home_section.set_home_status(
+        app.home_recent_tracks_status,
+        "Loading recently played tracks...",
+    )
+    thread = threading.Thread(
+        target=app._load_recently_played_tracks_worker,
         daemon=True,
     )
     thread.start()
@@ -131,6 +160,20 @@ def _load_recently_played_worker(app) -> None:
     GLib.idle_add(app.on_recently_played_loaded, albums, error)
 
 
+def _load_recently_played_tracks_worker(app) -> None:
+    error = ""
+    tracks: list[dict] = []
+    try:
+        tracks = app.client_session.run(
+            app.server_url,
+            app.auth_token,
+            app._fetch_recently_played_tracks_async,
+        )
+    except Exception as exc:
+        error = str(exc)
+    GLib.idle_add(app.on_recently_played_tracks_loaded, tracks, error)
+
+
 def _load_recently_added_worker(app) -> None:
     error = ""
     albums: list[dict] = []
@@ -174,6 +217,23 @@ def on_recently_played_loaded(app, albums: list[dict], error: str) -> None:
         app, app.home_recently_played_list, albums
     )
     home_section.update_home_status(app.home_recently_played_status, albums)
+
+
+def on_recently_played_tracks_loaded(
+    app,
+    tracks: list[dict],
+    error: str,
+) -> None:
+    app.home_recently_played_tracks_loading = False
+    if error:
+        _populate_home_recent_tracks(app, [])
+        home_section.set_home_status(
+            app.home_recent_tracks_status,
+            f"Unable to load recently played tracks: {error}",
+        )
+        return
+    _populate_home_recent_tracks(app, tracks)
+    home_section.update_home_status(app.home_recent_tracks_status, tracks)
 
 
 def on_recently_added_loaded(app, albums: list[dict], error: str) -> None:
@@ -264,18 +324,55 @@ async def _fetch_recently_played_albums_async(
     )
     albums: list[dict] = []
     for item in items:
-        item_id = getattr(item, "item_id", None)
-        provider = getattr(item, "provider", None)
-        if not item_id or not provider:
-            continue
-        try:
-            album = await client.music.get_album(item_id, provider)
-        except Exception:
-            continue
-        albums.append(library._serialize_album(client, album))
+        data = library._serialize_album(client, item)
+        if not data.get("image_url") and not data.get("artists"):
+            item_id, provider = _get_album_identity(item)
+            if item_id and provider:
+                try:
+                    item = await client.music.get_album(item_id, provider)
+                except Exception:
+                    item = None
+                if item is not None:
+                    data = library._serialize_album(client, item)
+        albums.append(data)
         if len(albums) >= HOME_LIST_LIMIT:
             break
     return albums
+
+
+async def _fetch_recently_played_tracks_async(
+    app,
+    client: MusicAssistantClient,
+) -> list[dict]:
+    items = await client.music.recently_played(
+        limit=HOME_LIST_LIMIT,
+        media_types=[MediaType.TRACK],
+    )
+    describe_quality = lambda item: track_utils.describe_track_quality(
+        item,
+        track_utils.format_sample_rate,
+    )
+    tracks: list[dict] = []
+    for index, item in enumerate(items or [], start=1):
+        payload = track_utils.serialize_track(
+            item,
+            _get_recent_track_album_name(item),
+            ui_utils.format_artist_names,
+            track_utils.format_duration,
+            describe_quality,
+        )
+        payload["track_number"] = index
+        image_url = image_loader.resolve_media_item_image_url(
+            client,
+            item,
+            app.server_url,
+        )
+        if image_url:
+            payload["image_url"] = image_url
+        tracks.append(payload)
+        if len(tracks) >= HOME_LIST_LIMIT:
+            break
+    return tracks
 
 
 async def _fetch_recently_added_albums_async(
@@ -287,18 +384,21 @@ async def _fetch_recently_added_albums_async(
         order_by="timestamp_added_desc",
     )
     serialized: list[dict] = []
-    for album in albums:
+    missing_ids: list[tuple[int, str, str]] = []
+    for index, album in enumerate(albums):
         data = library._serialize_album(client, album)
         if not data.get("artists"):
             item_id, provider = _get_album_identity(album)
             if item_id and provider:
-                try:
-                    album = await client.music.get_album(item_id, provider)
-                except Exception:
-                    album = None
-                if album is not None:
-                    data = library._serialize_album(client, album)
+                missing_ids.append((index, item_id, provider))
         serialized.append(data)
+    if missing_ids:
+        for index, item_id, provider in missing_ids:
+            try:
+                result = await client.music.get_album(item_id, provider)
+            except Exception:
+                continue
+            serialized[index] = library._serialize_album(client, result)
     return serialized
 
 
@@ -504,6 +604,44 @@ def _extract_artist_names(item: object) -> list[str]:
     return names
 
 
+def _populate_home_recent_tracks(app, tracks: list[dict]) -> None:
+    store = getattr(app, "home_recent_tracks_store", None)
+    if store is None:
+        return
+    store.remove_all()
+    for track in tracks:
+        row = TrackRow(
+            track_number=track.get("track_number", 0),
+            title=track.get("title", ""),
+            length_display=track.get("length_display", ""),
+            length_seconds=track.get("length_seconds", 0),
+            artist=track.get("artist", ""),
+            album=track.get("album", ""),
+            quality=track.get("quality", ""),
+            is_favorite=bool(track.get("is_favorite", False)),
+        )
+        row.source = track.get("source")
+        image_url = track.get("image_url")
+        if image_url:
+            row.image_url = image_url
+        store.append(row)
+    if getattr(app, "home_recent_tracks_view", None) and getattr(
+        app,
+        "home_recent_tracks_selection",
+        None,
+    ):
+        app.home_recent_tracks_view.set_model(app.home_recent_tracks_selection)
+
+
+def _get_recent_track_album_name(track: object) -> str:
+    album = getattr(track, "album", None)
+    if isinstance(album, dict):
+        return album.get("name") or ""
+    if album is not None:
+        return getattr(album, "name", None) or ""
+    return ""
+
+
 def on_main_stack_visible_child_changed(app, stack, _param) -> None:
     try:
         visible = stack.get_visible_child_name()
@@ -515,6 +653,8 @@ def on_main_stack_visible_child_changed(app, stack, _param) -> None:
         album_grid.ensure_album_grid_artwork(app)
     elif visible == "favorites":
         app.load_favorites()
+    elif visible == "queue":
+        app.refresh_queue_panel()
 
 
 def clear_home_album_selection(app) -> None:

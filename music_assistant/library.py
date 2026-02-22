@@ -31,14 +31,179 @@ def pick_album_value(album: object, fields: tuple[str, ...]) -> object | None:
     return None
 
 
+def _coerce_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_year(value: object) -> int | None:
+    if value is None:
+        return None
+    if hasattr(value, "year"):
+        year = _coerce_int(getattr(value, "year", None))
+    elif isinstance(value, str):
+        text = value.strip()
+        if len(text) >= 4 and text[:4].isdigit():
+            year = _coerce_int(text[:4])
+        else:
+            year = _coerce_int(text)
+    else:
+        year = _coerce_int(value)
+    if year is None or year < 1000 or year > 3000:
+        return None
+    return year
+
+
+def _extract_release_year(album: object) -> int | None:
+    year = _coerce_year(
+        pick_album_value(album, ("year", "release_year", "album_year"))
+    )
+    if year:
+        return year
+
+    metadata = pick_album_value(album, ("metadata",))
+    if isinstance(metadata, dict):
+        release_date = metadata.get("release_date") or metadata.get("year")
+    else:
+        release_date = getattr(metadata, "release_date", None) or getattr(
+            metadata, "year", None
+        )
+    year = _coerce_year(release_date)
+    if year:
+        return year
+
+    return _coerce_year(pick_album_value(album, ("release_date",)))
+
+
+def _extract_album_track_count(album: object) -> int | None:
+    count = _coerce_int(
+        pick_album_value(
+            album,
+            (
+                "track_count",
+                "tracks_count",
+                "total_tracks",
+                "num_tracks",
+                "track_total",
+            ),
+        )
+    )
+    if count is not None and count >= 0:
+        return count
+    if isinstance(album, dict):
+        tracks = album.get("tracks")
+        if isinstance(tracks, (list, tuple, set)):
+            return len(tracks)
+    return None
+
+
+def _extract_album_duration_seconds(album: object) -> int | None:
+    duration = _coerce_int(
+        pick_album_value(
+            album,
+            (
+                "duration_seconds",
+                "total_duration_seconds",
+                "duration",
+                "total_duration",
+                "album_duration",
+            ),
+        )
+    )
+    if duration is not None and duration >= 0:
+        return duration
+
+    duration_ms = _coerce_int(
+        pick_album_value(
+            album,
+            (
+                "duration_ms",
+                "total_duration_ms",
+                "album_duration_ms",
+            ),
+        )
+    )
+    if duration_ms is not None and duration_ms >= 0:
+        return int(round(duration_ms / 1000))
+    return None
+
+
+def _extract_artist_image_url(
+    client: MusicAssistantClient, artist: object
+) -> str | None:
+    if artist is None:
+        return None
+    if not isinstance(artist, dict):
+        try:
+            image_url = client.get_media_item_image_url(artist)
+        except Exception:
+            image_url = None
+        if image_url:
+            return image_url
+    if isinstance(artist, dict):
+        for key in ("image_url", "image", "thumbnail", "artwork", "cover"):
+            value = artist.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                for nested_key in ("url", "path", "uri"):
+                    nested = value.get(nested_key)
+                    if isinstance(nested, str) and nested.strip():
+                        return nested.strip()
+        metadata = artist.get("metadata")
+        if isinstance(metadata, dict):
+            images = metadata.get("images")
+            if isinstance(images, (list, tuple)):
+                for image in images:
+                    if isinstance(image, dict):
+                        for key in ("url", "path", "uri"):
+                            nested = image.get(key)
+                            if isinstance(nested, str) and nested.strip():
+                                return nested.strip()
+    return None
+
+
 def _serialize_album(client: MusicAssistantClient, album: object) -> dict:
-    name = getattr(album, "name", None) or "Unknown Album"
-    item_id = getattr(album, "item_id", None)
-    provider = getattr(album, "provider", None)
-    uri = getattr(album, "uri", None)
-    album_type = normalize_album_type(getattr(album, "album_type", None))
+    name = pick_album_value(album, ("name", "title")) or "Unknown Album"
+    item_id = pick_album_value(album, ("item_id", "id"))
+    provider = pick_album_value(
+        album,
+        ("provider", "provider_instance", "provider_domain"),
+    )
+    uri = pick_album_value(album, ("uri",))
+    album_type = normalize_album_type(
+        pick_album_value(album, ("album_type", "type"))
+    )
     provider_mappings = []
-    for mapping in getattr(album, "provider_mappings", []) or []:
+    raw_mappings = pick_album_value(album, ("provider_mappings",)) or []
+    if isinstance(raw_mappings, dict):
+        raw_mappings = [raw_mappings]
+    elif not isinstance(raw_mappings, (list, tuple, set)):
+        raw_mappings = [raw_mappings]
+    for mapping in raw_mappings:
+        if isinstance(mapping, dict):
+            provider_mappings.append(
+                {
+                    "item_id": mapping.get("item_id"),
+                    "provider_instance": mapping.get("provider_instance"),
+                    "provider_domain": mapping.get("provider_domain"),
+                    "available": mapping.get("available", True),
+                }
+            )
+            continue
         provider_mappings.append(
             {
                 "item_id": getattr(mapping, "item_id", None),
@@ -47,25 +212,24 @@ def _serialize_album(client: MusicAssistantClient, album: object) -> dict:
                 "available": getattr(mapping, "available", True),
             }
         )
+
+    raw_artists = pick_album_value(album, ("artists",))
+    if not raw_artists:
+        raw_artists = pick_album_value(
+            album,
+            (
+                "artist",
+                "artist_str",
+                "album_artist",
+                "album_artist_str",
+            ),
+        )
+
     artists = []
-    if isinstance(album, dict):
-        raw_artists = album.get("artists")
-        if not raw_artists:
-            raw_artists = (
-                album.get("artist")
-                or album.get("artist_str")
-                or album.get("album_artist")
-                or album.get("album_artist_str")
-            )
-    else:
-        raw_artists = getattr(album, "artists", None)
-        if not raw_artists:
-            raw_artists = (
-                getattr(album, "artist", None)
-                or getattr(album, "artist_str", None)
-                or getattr(album, "album_artist", None)
-                or getattr(album, "album_artist_str", None)
-            )
+    artist_image_url = pick_album_value(
+        album,
+        ("artist_image_url", "primary_artist_image_url"),
+    )
     if raw_artists:
         if isinstance(raw_artists, str):
             raw_artists = [raw_artists]
@@ -84,11 +248,18 @@ def _serialize_album(client: MusicAssistantClient, album: object) -> dict:
                 cleaned = str(artist_name).strip()
                 if cleaned:
                     artists.append(cleaned)
+            if not artist_image_url:
+                artist_image_url = _extract_artist_image_url(client, artist)
+
     image_url = None
     try:
         image_url = client.get_media_item_image_url(album)
     except Exception:
         image_url = None
+
+    year = _extract_release_year(album)
+    track_count = _extract_album_track_count(album)
+    duration_seconds = _extract_album_duration_seconds(album)
     added_at = pick_album_value(
         album,
         (
@@ -122,6 +293,14 @@ def _serialize_album(client: MusicAssistantClient, album: object) -> dict:
         "album_type": album_type,
         "provider_mappings": provider_mappings,
     }
+    if artist_image_url:
+        data["artist_image_url"] = artist_image_url
+    if year is not None:
+        data["year"] = year
+    if track_count is not None:
+        data["track_count"] = track_count
+    if duration_seconds is not None:
+        data["duration_seconds"] = duration_seconds
     if added_at is not None:
         data["added_at"] = added_at
     if last_played is not None:
@@ -157,15 +336,22 @@ def _serialize_playlist(playlist: object) -> dict:
     return data
 
 
-async def fetch_albums(client: MusicAssistantClient) -> list[dict]:
+async def fetch_albums(
+    client: MusicAssistantClient,
+    favorite: bool | None = None,
+    order_by: str = "sort_name",
+) -> list[dict]:
     albums: list[dict] = []
     offset = 0
     while True:
-        page = await client.music.get_library_albums(
-            limit=DEFAULT_PAGE_SIZE,
-            offset=offset,
-            order_by="sort_name",
-        )
+        params: dict[str, object] = {
+            "limit": DEFAULT_PAGE_SIZE,
+            "offset": offset,
+            "order_by": order_by,
+        }
+        if favorite is not None:
+            params["favorite"] = favorite
+        page = await client.music.get_library_albums(**params)
         if not page:
             break
         for album in page:
@@ -216,8 +402,14 @@ async def fetch_playlists(client: MusicAssistantClient) -> list[dict]:
 
 async def load_library_data(
     client: MusicAssistantClient,
+    album_favorite: bool | None = None,
+    album_order_by: str = "sort_name",
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    albums = await fetch_albums(client)
+    albums = await fetch_albums(
+        client,
+        favorite=album_favorite,
+        order_by=album_order_by,
+    )
     artists = await fetch_artists(client)
     playlists = await fetch_playlists(client)
     return albums, artists, playlists

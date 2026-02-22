@@ -89,6 +89,8 @@ def _apply_outputs_changed(app) -> None:
         app.output_targets_list.append(row)
         app.output_target_rows[(row.player_id, row.local_output_id)] = row
 
+    _populate_group_players_list(app, unique_outputs)
+
     selected = app.output_manager.get_selected_output()
     if not selected:
         return
@@ -120,6 +122,14 @@ def _apply_output_selected(app) -> None:
         if local_output_id != app._last_sendspin_local_output_id:
             app._last_sendspin_local_output_id = local_output_id
             app.on_local_output_selection_changed()
+    app.group_members_seed_player_id = None
+    app.grouped_player_ids = set()
+    _populate_group_players_list(
+        app,
+        app.output_manager.get_output_targets(),
+    )
+    if hasattr(app, "refresh_playback_settings"):
+        app.refresh_playback_settings()
 
 
 def on_output_loading_changed(app) -> None:
@@ -157,6 +167,22 @@ def set_output_status(app, message: str) -> None:
         return
     app.output_status_label.set_text(message)
     app.output_status_label.set_visible(bool(message))
+
+
+def on_group_player_toggled(app, player_id: str, checked: bool) -> None:
+    if not app.server_url:
+        return
+    primary_player_id = (
+        app.output_manager.preferred_player_id if app.output_manager else None
+    )
+    if not primary_player_id or primary_player_id == player_id:
+        return
+    thread = threading.Thread(
+        target=_group_player_toggle_worker,
+        args=(app, primary_player_id, player_id, bool(checked)),
+        daemon=True,
+    )
+    thread.start()
 
 
 def on_sendspin_connected(app) -> None:
@@ -268,6 +294,7 @@ def on_sendspin_volume_change(app, volume: int) -> None:
 
 def on_sendspin_mute_change(app, muted: bool) -> None:
     app.set_sendspin_muted(muted)
+    app.update_mute_button_icon()
 
 
 def update_volume_slider(app, volume: int) -> None:
@@ -289,6 +316,29 @@ def update_volume_slider(app, volume: int) -> None:
     finally:
         app.suppress_volume_changes = False
     app.last_volume_value = volume
+    app.update_mute_button_icon()
+
+
+def update_mute_button_icon(app) -> None:
+    image = getattr(app, "mute_button_image", None)
+    if image is None:
+        return
+    muted = bool(getattr(app.sendspin_manager, "muted", False))
+    if muted:
+        icon_name = "audio-volume-muted-symbolic"
+    else:
+        slider = getattr(app, "volume_slider", None)
+        if slider is not None:
+            volume = int(round(slider.get_value()))
+        else:
+            volume = int(round(getattr(app.sendspin_manager, "volume", 0.0) * 100))
+        if volume > 66:
+            icon_name = "audio-volume-high-symbolic"
+        elif volume > 33:
+            icon_name = "audio-volume-medium-symbolic"
+        else:
+            icon_name = "audio-volume-low-symbolic"
+    image.set_from_icon_name(icon_name)
 
 
 def set_sendspin_volume(app, volume: int) -> None:
@@ -302,44 +352,6 @@ def set_sendspin_volume(app, volume: int) -> None:
 def set_sendspin_muted(app, muted: bool) -> None:
     app.sendspin_manager.set_muted(muted)
     app.audio_pipeline.set_muted(app.sendspin_manager.muted)
-
-
-def _volume_step_size(volume: int) -> int:
-    if volume < 5 or volume > 95:
-        return 1
-    if volume < 20 or volume > 80:
-        return 2
-    return 5
-
-
-def _calculate_volume_steps(
-    current_volume: int,
-    target_volume: int,
-) -> tuple[int, int, int]:
-    if current_volume == target_volume:
-        return 0, 0, current_volume
-    direction = 1 if target_volume > current_volume else -1
-    steps = 0
-    volume = current_volume
-    # Mirror Music Assistant's cmd_volume_up/down step sizes.
-    while volume != target_volume:
-        step = _volume_step_size(volume)
-        if step <= 0:
-            break
-        next_volume = volume + (step * direction)
-        if direction > 0:
-            volume = min(100, next_volume)
-            steps += 1
-            if volume >= target_volume:
-                break
-        else:
-            volume = max(0, next_volume)
-            steps += 1
-            if volume <= target_volume:
-                break
-        if volume in (0, 100):
-            break
-    return direction, steps, volume
 
 
 def _maybe_transfer_output(
@@ -389,35 +401,221 @@ def _transfer_output_worker(
         )
 
 
+def _schedule_group_members_refresh(
+    app,
+    selected_player_id: str | None,
+) -> None:
+    if not app.server_url or not selected_player_id:
+        app.group_members_seed_player_id = None
+        app.grouped_player_ids = set()
+        return
+    if getattr(app, "group_members_seed_player_id", None) == selected_player_id:
+        return
+    if (
+        getattr(app, "group_members_refresh_player_id", None)
+        == selected_player_id
+    ):
+        return
+    app.group_members_refresh_player_id = selected_player_id
+    thread = threading.Thread(
+        target=_group_members_refresh_worker,
+        args=(app, selected_player_id),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _group_members_refresh_worker(
+    app,
+    selected_player_id: str,
+) -> None:
+    member_ids: list[str] = []
+    error = ""
+    try:
+        member_ids = playback.fetch_group_member_ids(
+            app.client_session,
+            app.server_url,
+            app.auth_token,
+            selected_player_id,
+        )
+    except Exception as exc:
+        error = str(exc)
+    GLib.idle_add(
+        _on_group_members_refreshed,
+        app,
+        selected_player_id,
+        member_ids,
+        error,
+    )
+
+
+def _on_group_members_refreshed(
+    app,
+    selected_player_id: str,
+    member_ids: list[str],
+    error: str,
+) -> bool:
+    current_selected = (
+        app.output_manager.get_selected_output() if app.output_manager else None
+    )
+    current_selected_player_id = (
+        current_selected.get("player_id") if current_selected else None
+    )
+    if current_selected_player_id != selected_player_id:
+        if (
+            getattr(app, "group_members_refresh_player_id", None)
+            == selected_player_id
+        ):
+            app.group_members_refresh_player_id = None
+        return False
+    if (
+        getattr(app, "group_members_refresh_player_id", None)
+        == selected_player_id
+    ):
+        app.group_members_refresh_player_id = None
+    if error:
+        logging.getLogger(__name__).warning(
+            "Unable to fetch grouped players: %s",
+            error,
+        )
+        app.group_members_seed_player_id = selected_player_id
+        return False
+    app.grouped_player_ids = {
+        str(member_id)
+        for member_id in member_ids
+        if member_id
+    }
+    app.group_members_seed_player_id = selected_player_id
+    _populate_group_players_list(
+        app,
+        app.output_manager.get_output_targets() if app.output_manager else [],
+    )
+    return False
+
+
+def _populate_group_players_list(app, outputs: list[dict]) -> None:
+    group_box = getattr(app, "output_group_players_box", None)
+    if group_box is None:
+        return
+    ui_utils.clear_container(group_box)
+    selected = app.output_manager.get_selected_output() if app.output_manager else None
+    selected_player_id = selected.get("player_id") if selected else None
+    _schedule_group_members_refresh(app, selected_player_id)
+    grouped_ids = set(getattr(app, "grouped_player_ids", set()) or set())
+    by_player_id: dict[str, str] = {}
+    for output in outputs or []:
+        player_id = output.get("player_id")
+        display_name = output.get("display_name") or player_id
+        if not player_id or player_id in by_player_id:
+            continue
+        by_player_id[player_id] = display_name
+    app.output_group_rows = {}
+    app.output_group_populating = True
+    try:
+        for player_id, display_name in by_player_id.items():
+            check = Gtk.CheckButton(label=display_name)
+            check.set_halign(Gtk.Align.START)
+            if selected_player_id and player_id == selected_player_id:
+                check.set_active(True)
+                check.set_sensitive(False)
+            else:
+                check.set_active(player_id in grouped_ids)
+                check.connect(
+                    "toggled",
+                    lambda button, pid=player_id: app.on_group_player_toggled(
+                        pid,
+                        button.get_active(),
+                    ),
+                )
+            group_box.append(check)
+            app.output_group_rows[player_id] = check
+    finally:
+        app.output_group_populating = False
+
+
+def _group_player_toggle_worker(
+    app,
+    primary_player_id: str,
+    player_id: str,
+    checked: bool,
+) -> None:
+    grouped_ids: set[str] = set()
+    error = ""
+    try:
+        grouped_ids = {
+            str(member_id)
+            for member_id in playback.fetch_group_member_ids(
+                app.client_session,
+                app.server_url,
+                app.auth_token,
+                primary_player_id,
+            )
+            if member_id and str(member_id) != primary_player_id
+        }
+        if checked:
+            grouped_ids.add(player_id)
+            playback.group_players(
+                app.client_session,
+                app.server_url,
+                app.auth_token,
+                primary_player_id,
+                sorted(grouped_ids),
+            )
+        else:
+            was_grouped = player_id in grouped_ids
+            grouped_ids.discard(player_id)
+            if was_grouped:
+                playback.ungroup_player(
+                    app.client_session,
+                    app.server_url,
+                    app.auth_token,
+                    player_id,
+                )
+            if grouped_ids:
+                playback.group_players(
+                    app.client_session,
+                    app.server_url,
+                    app.auth_token,
+                    primary_player_id,
+                    sorted(grouped_ids),
+                )
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        logging.getLogger(__name__).warning(
+            "Group players update failed: %s",
+            error,
+        )
+    else:
+        app.grouped_player_ids = grouped_ids
+        app.group_members_seed_player_id = primary_player_id
+    GLib.idle_add(
+        _populate_group_players_list,
+        app,
+        app.output_manager.get_output_targets() if app.output_manager else [],
+    )
+
+
 def set_output_volume(app, volume: int) -> None:
     volume = max(0, min(100, volume))
-    current_volume = app.last_volume_value
-    if current_volume is None:
-        if app.volume_slider:
-            current_volume = int(round(app.volume_slider.get_value()))
-        else:
-            current_volume = volume
-    direction, steps, expected_volume = _calculate_volume_steps(
-        current_volume,
-        volume,
-    )
-    app.last_volume_value = expected_volume
+    app.last_volume_value = volume
     if app.output_manager.is_sendspin_player_id(app.output_manager.preferred_player_id):
-        app.set_sendspin_volume(expected_volume)
+        app.set_sendspin_volume(volume)
     else:
         if app.mpris_manager:
-            app.mpris_manager.notify_volume_changed(expected_volume / 100.0)
-    app.update_volume_slider(expected_volume)
+            app.mpris_manager.notify_volume_changed(volume / 100.0)
+    app.update_volume_slider(volume)
     if (
         not app.server_url
         or not app.output_manager.preferred_player_id
-        or steps <= 0
-        or direction == 0
+        or app.output_manager.is_sendspin_player_id(
+            app.output_manager.preferred_player_id
+        )
     ):
         return
     thread = threading.Thread(
         target=app._volume_command_worker,
-        args=(app.output_manager.preferred_player_id, direction, steps),
+        args=(app.output_manager.preferred_player_id, volume),
         daemon=True,
     )
     thread.start()
@@ -426,20 +624,16 @@ def set_output_volume(app, volume: int) -> None:
 def _volume_command_worker(
     app,
     player_id: str,
-    direction: int,
-    steps: int,
+    volume: int,
 ) -> None:
-    if direction == 0 or steps <= 0:
-        return
     error = ""
     try:
-        playback.step_player_volume(
+        playback.set_player_volume(
             app.client_session,
             app.server_url,
             app.auth_token,
             player_id,
-            direction,
-            steps,
+            volume,
         )
     except Exception as exc:
         error = str(exc)

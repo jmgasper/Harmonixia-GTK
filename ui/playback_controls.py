@@ -38,6 +38,18 @@ def build_controls(app) -> Gtk.Widget:
     playback.append(next_button)
     playback.append(output_selector.build_output_selector(app))
 
+    art_thumb = Gtk.Picture()
+    art_thumb.add_css_class("now-playing-art-thumb")
+    art_thumb.set_size_request(48, 48)
+    art_thumb.set_halign(Gtk.Align.START)
+    art_thumb.set_valign(Gtk.Align.CENTER)
+    art_thumb.set_can_shrink(True)
+    art_thumb.set_visible(False)
+    if hasattr(art_thumb, "set_content_fit") and hasattr(Gtk, "ContentFit"):
+        art_thumb.set_content_fit(Gtk.ContentFit.COVER)
+    elif hasattr(art_thumb, "set_keep_aspect_ratio"):
+        art_thumb.set_keep_aspect_ratio(False)
+
     now_playing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
     now_playing.set_hexpand(True)
     now_playing.set_valign(Gtk.Align.CENTER)
@@ -121,27 +133,40 @@ def build_controls(app) -> Gtk.Widget:
     time_current.add_css_class("now-playing-time")
     time_current.set_xalign(0)
 
-    progress = Gtk.ProgressBar()
-    progress.set_hexpand(True)
-    progress.set_valign(Gtk.Align.CENTER)
-    progress.set_fraction(0.0)
-    if hasattr(progress, "set_can_target"):
-        progress.set_can_target(True)
-    progress_gesture = Gtk.GestureClick.new()
-    progress_gesture.connect("released", app.on_playback_progress_clicked)
-    progress.add_controller(progress_gesture)
+    seek_scale = Gtk.Scale.new_with_range(
+        Gtk.Orientation.HORIZONTAL,
+        0.0,
+        1.0,
+        0.001,
+    )
+    seek_scale.add_css_class("seek-scale")
+    seek_scale.set_draw_value(False)
+    seek_scale.set_hexpand(True)
+    seek_scale.set_valign(Gtk.Align.CENTER)
+    seek_scale.set_value(0.0)
+    seek_scale.connect("value-changed", app.on_seek_scale_changed)
+    seek_gesture = Gtk.GestureClick.new()
+    seek_gesture.connect("pressed", app.on_seek_drag_begin)
+    seek_gesture.connect("released", app.on_seek_drag_end)
+    seek_scale.add_controller(seek_gesture)
 
     time_total = Gtk.Label(label="0:00")
     time_total.add_css_class("now-playing-time")
     time_total.set_xalign(1)
 
     progress_row.append(time_current)
-    progress_row.append(progress)
+    progress_row.append(seek_scale)
     progress_row.append(time_total)
 
     now_playing.append(title_row)
     now_playing.append(artist_row)
     now_playing.append(progress_row)
+
+    now_playing_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    now_playing_row.set_hexpand(True)
+    now_playing_row.set_valign(Gtk.Align.CENTER)
+    now_playing_row.append(art_thumb)
+    now_playing_row.append(now_playing)
 
     app.previous_button = previous_button
     app.play_pause_button = play_pause_button
@@ -155,12 +180,23 @@ def build_controls(app) -> Gtk.Widget:
     app.now_playing_artist_button = artist_button
     app.now_playing_artist_label = artist
     app.now_playing_quality_label = quality
-    app.playback_progress_bar = progress
+    app.now_playing_art_thumb = art_thumb
+    app.playback_seek_scale = seek_scale
     app.playback_time_current_label = time_current
     app.playback_time_total_label = time_total
 
     search_and_volume = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
     search_and_volume.set_valign(Gtk.Align.CENTER)
+
+    mute_button_image = Gtk.Image.new_from_icon_name("audio-volume-high-symbolic")
+    mute_button = Gtk.Button()
+    mute_button.add_css_class("flat")
+    mute_button.add_css_class("mute-button")
+    mute_button.set_tooltip_text("Mute / Unmute")
+    mute_button.set_child(mute_button_image)
+    mute_button.connect("clicked", app.on_mute_button_clicked)
+    app.mute_button = mute_button
+    app.mute_button_image = mute_button_image
 
     volume = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
     volume.set_draw_value(False)
@@ -194,22 +230,22 @@ def build_controls(app) -> Gtk.Widget:
     )
     app.eq_button = eq_button
 
-    search = Gtk.SearchEntry()
-    search.set_placeholder_text("Search Library")
-    search.set_size_request(200, -1)
-    search.connect("search-changed", app.on_search_changed)
-    search.connect("activate", app.on_search_activated)
-    app.search_entry = search
-
-    search_and_volume.append(Gtk.Label(label="Volume"))
+    search_and_volume.append(mute_button)
     search_and_volume.append(volume)
     search_and_volume.append(eq_button)
-    search_and_volume.append(Gtk.Separator.new(Gtk.Orientation.VERTICAL))
-    search_and_volume.append(search)
+    app.update_mute_button_icon()
 
-    controls.append(playback)
-    controls.append(Gtk.Separator.new(Gtk.Orientation.VERTICAL))
-    controls.append(now_playing)
+    playback_and_now_playing = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=10,
+    )
+    playback_and_now_playing.set_hexpand(True)
+    playback_and_now_playing.set_valign(Gtk.Align.CENTER)
+    playback_and_now_playing.append(playback)
+    playback_and_now_playing.append(Gtk.Separator.new(Gtk.Orientation.VERTICAL))
+    playback_and_now_playing.append(now_playing_row)
+
+    controls.append(playback_and_now_playing)
     controls.append(Gtk.Separator.new(Gtk.Orientation.VERTICAL))
     controls.append(search_and_volume)
 

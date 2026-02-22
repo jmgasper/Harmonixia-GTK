@@ -49,10 +49,6 @@ def connect_to_server(
     if update_settings_entries:
         update_settings_entries()
 
-    start_output_listener = _get_callback(callbacks, "start_output_listener")
-    if start_output_listener:
-        start_output_listener()
-
     start_sendspin_client = _get_callback(callbacks, "start_sendspin_client")
     if start_sendspin_client:
         start_sendspin_client()
@@ -60,6 +56,12 @@ def connect_to_server(
     schedule_output_refresh = _get_callback(callbacks, "schedule_output_refresh")
     if schedule_output_refresh:
         schedule_output_refresh()
+
+    prefetch_provider_manifests = _get_callback(
+        callbacks, "prefetch_provider_manifests"
+    )
+    if prefetch_provider_manifests:
+        prefetch_provider_manifests()
 
     load_library = _get_callback(callbacks, "load_library")
     if load_library:

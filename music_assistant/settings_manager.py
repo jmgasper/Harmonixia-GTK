@@ -3,7 +3,12 @@
 import json
 import logging
 
-from music_assistant import client
+from constants import (
+    MEDIA_TILE_SIZE_COMPACT,
+    MEDIA_TILE_SIZE_LARGE,
+    MEDIA_TILE_SIZE_NORMAL,
+)
+from music_assistant import client, playback_state
 from ui import playlist_manager
 
 
@@ -80,6 +85,19 @@ def load_settings(app) -> None:
         eq_selected_preset = None
     app.eq_enabled = eq_enabled
     app.eq_selected_preset = eq_selected_preset
+
+    album_tile_size = payload.get("album_tile_size", MEDIA_TILE_SIZE_NORMAL)
+    try:
+        album_tile_size = int(album_tile_size)
+    except (TypeError, ValueError):
+        album_tile_size = MEDIA_TILE_SIZE_NORMAL
+    if album_tile_size not in (
+        MEDIA_TILE_SIZE_COMPACT,
+        MEDIA_TILE_SIZE_NORMAL,
+        MEDIA_TILE_SIZE_LARGE,
+    ):
+        album_tile_size = MEDIA_TILE_SIZE_NORMAL
+    app.album_tile_size = album_tile_size
 
 
 def save_settings(app, server_url: str, auth_token: str) -> None:
@@ -227,6 +245,50 @@ def persist_eq_settings(app, path: str | None = None) -> None:
         )
 
 
+def persist_album_density(app, path: str | None = None) -> None:
+    payload: dict[str, object] = {}
+    path = path or app.get_settings_path()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            existing = json.load(handle)
+        if isinstance(existing, dict):
+            payload.update(existing)
+    except FileNotFoundError:
+        payload = {}
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to read settings from %s: %s",
+            path,
+            exc,
+        )
+        payload = {}
+
+    tile_size = getattr(app, "album_tile_size", MEDIA_TILE_SIZE_NORMAL)
+    if tile_size not in (
+        MEDIA_TILE_SIZE_COMPACT,
+        MEDIA_TILE_SIZE_NORMAL,
+        MEDIA_TILE_SIZE_LARGE,
+    ):
+        tile_size = MEDIA_TILE_SIZE_NORMAL
+    payload["album_tile_size"] = int(tile_size)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(
+                payload,
+                handle,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=True,
+            )
+            handle.write("\n")
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to write settings to %s: %s",
+            path,
+            exc,
+        )
+
+
 def update_settings_entries(app) -> None:
     if app.settings_server_entry is not None:
         if app.server_url:
@@ -282,7 +344,7 @@ def connect_to_server(
         "persist": persist,
         "save_settings": app.save_settings,
         "update_settings_entries": app.update_settings_entries,
-        "start_output_listener": app.output_manager.start_monitoring,
+        "prefetch_provider_manifests": lambda: playback_state._ensure_provider_manifests_loaded(app),
         "start_sendspin_client": lambda: app.sendspin_manager.start(app.server_url),
         "schedule_output_refresh": app.output_manager.refresh,
         "load_library": app.load_library,

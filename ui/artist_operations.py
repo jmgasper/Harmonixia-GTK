@@ -1,8 +1,13 @@
-from gi.repository import Gtk
+import threading
+
+from gi.repository import GLib, Gtk
 
 from constants import MEDIA_TILE_SIZE
+from music_assistant_client import MusicAssistantClient
 from ui import image_loader, ui_utils
+from ui import track_utils
 from ui.widgets import album_card
+from ui.widgets.track_row import TrackRow
 
 
 def on_artist_row_activated(
@@ -52,6 +57,7 @@ def refresh_artist_albums(app) -> None:
     update_artist_albums_header(app, artist_name, len(albums))
     populate_artist_album_flow(app, albums)
     update_artist_albums_status(app, artist_name, albums)
+    _start_artist_top_tracks_refresh(app, artist, artist_name)
 
 
 def update_artist_albums_header(
@@ -99,6 +105,7 @@ def populate_artist_album_flow(app, albums: list[dict]) -> None:
             artist_label,
             image_url,
             art_size=MEDIA_TILE_SIZE,
+            album_data=album,
         )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
@@ -162,3 +169,140 @@ def filter_artist_albums(app, artist_name: str) -> list[dict]:
 
 def normalize_artist_name(name: str) -> str:
     return (name or "").strip().casefold()
+
+
+def _start_artist_top_tracks_refresh(
+    app,
+    artist: object,
+    artist_name: str,
+) -> None:
+    if not getattr(app, "artist_tracks_store", None):
+        return
+    app.artist_tracks_store.remove_all()
+    if not app.server_url:
+        return
+    provider = _get_artist_provider(artist)
+    thread = threading.Thread(
+        target=_load_artist_top_tracks_worker,
+        args=(app, artist, artist_name, provider),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _load_artist_top_tracks_worker(
+    app,
+    artist: object,
+    artist_name: str,
+    provider: str | None,
+) -> None:
+    error = ""
+    tracks: list[dict] = []
+    try:
+        tracks = app.client_session.run(
+            app.server_url,
+            app.auth_token,
+            app._fetch_artist_top_tracks_async,
+            artist_name,
+            provider,
+        )
+    except Exception as exc:
+        error = str(exc)
+    GLib.idle_add(app.on_artist_top_tracks_loaded, artist, tracks, error)
+
+
+async def _fetch_artist_top_tracks_async(
+    app,
+    client: MusicAssistantClient,
+    artist_name: str,
+    provider: str | None,
+) -> list[dict]:
+    if provider:
+        tracks = await client.music.get_artist_tracks(artist_name, provider)
+    else:
+        tracks = await client.music.get_artist_tracks(artist_name)
+    describe_quality = lambda item: track_utils.describe_track_quality(
+        item,
+        track_utils.format_sample_rate,
+    )
+    serialized: list[dict] = []
+    for index, track in enumerate(tracks or [], start=1):
+        payload = track_utils.serialize_track(
+            track,
+            "",
+            ui_utils.format_artist_names,
+            track_utils.format_duration,
+            describe_quality,
+        )
+        payload["track_number"] = index
+        image_url = image_loader.resolve_media_item_image_url(
+            client,
+            track,
+            app.server_url,
+        )
+        if image_url:
+            payload["image_url"] = image_url
+        serialized.append(payload)
+    return serialized
+
+
+def on_artist_top_tracks_loaded(
+    app,
+    artist: object,
+    tracks: list[dict],
+    error: str,
+) -> None:
+    if normalize_artist_name(get_artist_name(artist)) != normalize_artist_name(
+        get_artist_name(getattr(app, "current_artist", None))
+    ):
+        return
+    if error:
+        return
+    _populate_artist_tracks_store(app, tracks)
+
+
+def _populate_artist_tracks_store(app, tracks: list[dict]) -> None:
+    store = getattr(app, "artist_tracks_store", None)
+    if store is None:
+        return
+    store.remove_all()
+    for track in tracks:
+        row = TrackRow(
+            track_number=track.get("track_number", 0),
+            title=track.get("title", ""),
+            length_display=track.get("length_display", ""),
+            length_seconds=track.get("length_seconds", 0),
+            artist=track.get("artist", ""),
+            album=track.get("album", ""),
+            quality=track.get("quality", ""),
+            is_favorite=bool(track.get("is_favorite", False)),
+        )
+        row.source = track.get("source")
+        image_url = track.get("image_url")
+        if image_url:
+            row.image_url = image_url
+        store.append(row)
+    if getattr(app, "artist_tracks_view", None) and getattr(
+        app,
+        "artist_tracks_selection",
+        None,
+    ):
+        app.artist_tracks_view.set_model(app.artist_tracks_selection)
+
+
+def _get_artist_provider(artist: object) -> str | None:
+    if isinstance(artist, dict):
+        provider = (
+            artist.get("provider")
+            or artist.get("provider_instance")
+            or artist.get("provider_domain")
+        )
+    else:
+        provider = (
+            getattr(artist, "provider", None)
+            or getattr(artist, "provider_instance", None)
+            or getattr(artist, "provider_domain", None)
+        )
+    if isinstance(provider, str):
+        provider = provider.strip()
+    return provider or None

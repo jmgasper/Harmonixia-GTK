@@ -53,6 +53,14 @@ def build_output_selector(app) -> Gtk.Widget:
     listbox.connect("row-activated", app.on_output_target_activated)
     container.append(listbox)
 
+    group_label = Gtk.Label(label="Group Players", xalign=0)
+    group_label.add_css_class("output-title")
+    container.append(group_label)
+
+    group_players_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    group_players_box.add_css_class("output-group-list")
+    container.append(group_players_box)
+
     status = Gtk.Label()
     status.add_css_class("status-label")
     status.set_xalign(0)
@@ -66,6 +74,7 @@ def build_output_selector(app) -> Gtk.Widget:
     app.output_menu_button = menu_button
     app.output_popover = popover
     app.output_targets_list = listbox
+    app.output_group_players_box = group_players_box
     app.output_status_label = status
     app.output_label = output_label
 

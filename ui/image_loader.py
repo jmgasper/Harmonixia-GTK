@@ -27,21 +27,19 @@ _default_executor: concurrent.futures.ThreadPoolExecutor | None = None
 _executor_lock = threading.Lock()
 _TEXTURE_CACHE_MAX_DIM = 256
 _TEXTURE_CACHE_LIMIT = 256
-_texture_cache: OrderedDict[str, tuple[int, Gdk.Texture]] = OrderedDict()
+_texture_cache: OrderedDict[tuple[str, int], Gdk.Texture] = OrderedDict()
 _texture_cache_lock = threading.Lock()
 
 
 def _get_cached_texture(image_url: str, size: int) -> Gdk.Texture | None:
     if not image_url or size <= 0 or size > _TEXTURE_CACHE_MAX_DIM:
         return None
+    cache_key = (image_url, size)
     with _texture_cache_lock:
-        cached = _texture_cache.get(image_url)
-        if not cached:
+        texture = _texture_cache.get(cache_key)
+        if not texture:
             return None
-        cached_size, texture = cached
-        if cached_size < size:
-            return None
-        _texture_cache.move_to_end(image_url)
+        _texture_cache.move_to_end(cache_key)
         return texture
 
 
@@ -50,13 +48,13 @@ def _store_cached_texture(
 ) -> None:
     if not image_url or size <= 0 or size > _TEXTURE_CACHE_MAX_DIM:
         return
+    cache_key = (image_url, size)
     with _texture_cache_lock:
-        cached = _texture_cache.get(image_url)
-        if cached and cached[0] >= size:
-            _texture_cache.move_to_end(image_url)
+        if cache_key in _texture_cache:
+            _texture_cache.move_to_end(cache_key)
             return
-        _texture_cache[image_url] = (size, texture)
-        _texture_cache.move_to_end(image_url)
+        _texture_cache[cache_key] = texture
+        _texture_cache.move_to_end(cache_key)
         while len(_texture_cache) > _TEXTURE_CACHE_LIMIT:
             _texture_cache.popitem(last=False)
 
@@ -596,14 +594,16 @@ def apply_album_art(
     image_url: str,
     sidebar_art: Gtk.Picture,
     sidebar_url: str,
+    cache_size: int | None = None,
 ) -> bool:
     try:
         texture = Gdk.Texture.new_for_pixbuf(pixbuf)
     except Exception:
         return False
+    cache_dim = cache_size or max(pixbuf.get_width(), pixbuf.get_height())
     _store_cached_texture(
         image_url,
-        max(pixbuf.get_width(), pixbuf.get_height()),
+        cache_dim,
         texture,
     )
     if sidebar_art is not None and picture is sidebar_art:
@@ -632,7 +632,15 @@ def _fetch_album_art(
     if pixbuf is None:
         return
     pixbuf = scale_album_art(pixbuf, size)
-    GLib.idle_add(apply_album_art, picture, pixbuf, image_url, None, None)
+    GLib.idle_add(
+        apply_album_art,
+        picture,
+        pixbuf,
+        image_url,
+        None,
+        None,
+        size,
+    )
 
 
 def _fetch_album_background(

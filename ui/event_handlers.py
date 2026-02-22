@@ -1,11 +1,13 @@
 """UI event handlers for MusicApp."""
 
 import logging
+import threading
 import time
 from types import SimpleNamespace
 
 from gi.repository import Gdk, GLib, Gtk
 
+from music_assistant import playback
 from music_assistant_models.enums import PlaybackState
 from ui import image_loader
 
@@ -21,6 +23,34 @@ def on_track_action_clicked(app, button: Gtk.Button, menu_button, action: str) -
     if action == "Play":
         if track:
             app.start_playback_from_track(track)
+        return
+    if action == "Play Next":
+        _run_track_queue_action(
+            app,
+            track,
+            playback.play_next,
+            "Play Next",
+        )
+        return
+    if action == "Add to Queue":
+        _run_track_queue_action(
+            app,
+            track,
+            playback.add_to_queue,
+            "Add to Queue",
+        )
+        return
+    if action == "Start Radio":
+        _run_track_queue_action(
+            app,
+            track,
+            playback.play_radio,
+            "Start Radio",
+        )
+        return
+    if action == "Go to Album":
+        if track:
+            _show_track_album_detail(app, track)
         return
     if action == "Remove from this playlist":
         if track:
@@ -50,6 +80,73 @@ def on_track_action_clicked(app, button: Gtk.Button, menu_button, action: str) -
 
         playlist_manager.show_create_playlist_dialog(app, track)
         return
+
+
+def _run_track_queue_action(
+    app,
+    track,
+    action_fn,
+    action_label: str,
+) -> None:
+    if not track or not app.server_url:
+        return
+    source_uri = _resolve_track_source_uri(track)
+    if not source_uri:
+        logging.getLogger(__name__).warning(
+            "Track action '%s' failed: missing source URI.",
+            action_label,
+        )
+        return
+    thread = threading.Thread(
+        target=_track_queue_action_worker,
+        args=(app, action_fn, source_uri, action_label),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _track_queue_action_worker(
+    app,
+    action_fn,
+    source_uri: str,
+    action_label: str,
+) -> None:
+    error = ""
+    try:
+        action_fn(
+            app.client_session,
+            app.server_url,
+            app.auth_token,
+            source_uri,
+            app.output_manager.preferred_player_id
+            if app.output_manager
+            else None,
+        )
+        if action_fn is playback.play_radio:
+            _refresh_remote_playback_state(app)
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        logging.getLogger(__name__).warning(
+            "Track action '%s' failed: %s",
+            action_label,
+            error,
+        )
+
+
+def _resolve_track_source_uri(track) -> str | None:
+    source = getattr(track, "source", None)
+    if isinstance(source, dict):
+        uri = source.get("uri") or source.get("source_uri")
+    else:
+        uri = getattr(source, "uri", None) or getattr(
+            source, "source_uri", None
+        )
+    if not uri:
+        uri = getattr(track, "source_uri", None)
+    if isinstance(uri, str):
+        uri = uri.strip()
+    return uri or None
 
 
 def on_track_selection_changed(app, selection, _position: int, _n_items: int) -> None:
@@ -130,10 +227,114 @@ def on_volume_drag_end(
         app.update_volume_slider(app.last_volume_value)
 
 
+def on_seek_scale_changed(app, scale: Gtk.Scale) -> None:
+    if not getattr(app, "seek_dragging", False):
+        return
+    if app.playback_track_info is None:
+        return
+    duration = app.playback_duration or 0
+    if duration <= 0:
+        return
+    value = max(0.0, min(1.0, float(scale.get_value())))
+    position = max(0.0, min(float(duration), value * float(duration)))
+    app.playback_elapsed = position
+    app.playback_last_tick = time.monotonic()
+    app.update_playback_progress_ui()
+
+
+def on_seek_drag_begin(
+    app, _gesture, _n_press: int, _x: float, _y: float
+) -> None:
+    app.seek_dragging = True
+
+
+def on_seek_drag_end(
+    app, _gesture, _n_press: int, _x: float, _y: float
+) -> None:
+    if app.playback_track_info is None:
+        app.seek_dragging = False
+        return
+    duration = app.playback_duration or 0
+    scale = getattr(app, "playback_seek_scale", None)
+    if duration <= 0 or scale is None:
+        app.seek_dragging = False
+        return
+    value = max(0.0, min(1.0, float(scale.get_value())))
+    position = int(round(value * float(duration)))
+    position = max(0, min(position, int(duration)))
+    app.playback_elapsed = float(position)
+    app.playback_last_tick = time.monotonic()
+    app.update_playback_progress_ui()
+    app.send_playback_command("seek", position=position)
+    if app.mpris_manager:
+        app.mpris_manager.emit_mpris_seeked(int(position * 1_000_000))
+    app.seek_dragging = False
+
+
+def on_mute_button_clicked(app, _button: Gtk.Button) -> None:
+    current_muted = bool(getattr(app.sendspin_manager, "muted", False))
+    target_muted = not current_muted
+    app.set_sendspin_muted(target_muted)
+    app.update_mute_button_icon()
+    output_manager = getattr(app, "output_manager", None)
+    if not output_manager or not app.server_url:
+        return
+    player_id = output_manager.preferred_player_id
+    if not player_id:
+        return
+    if output_manager.is_sendspin_player_id(player_id):
+        return
+    thread = threading.Thread(
+        target=_remote_mute_worker,
+        args=(app, player_id, target_muted),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _remote_mute_worker(app, player_id: str, muted: bool) -> None:
+    try:
+        app.client_session.run(
+            app.server_url,
+            app.auth_token,
+            _remote_mute_async,
+            player_id,
+            muted,
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Mute toggle failed for %s: %s",
+            player_id,
+            exc,
+        )
+
+
+async def _remote_mute_async(client, player_id: str, muted: bool) -> None:
+    players = getattr(client, "players", None)
+    if players is None:
+        return
+    if hasattr(players, "volume_mute"):
+        await players.volume_mute(player_id, muted)
+        return
+    if hasattr(players, "player_command_volume_mute"):
+        await players.player_command_volume_mute(player_id, muted)
+        return
+    if hasattr(players, "player_command"):
+        from music_assistant_models.enums import PlayerCommand
+
+        await players.player_command(
+            player_id,
+            PlayerCommand.VOLUME_MUTE,
+            muted,
+        )
+
+
 def on_playback_progress_clicked(
     app, _gesture, _n_press: int, x: float, _y: float
 ) -> None:
-    progress = app.playback_progress_bar
+    progress = getattr(app, "playback_seek_scale", None) or getattr(
+        app, "playback_progress_bar", None
+    )
     if not progress or app.playback_track_info is None:
         return
     duration = app.playback_duration or 0
@@ -211,11 +412,416 @@ def on_now_playing_art_context_menu(
     popover.popup()
 
 
+def on_album_card_play_clicked(app, album_data: object) -> None:
+    if not album_data:
+        return
+    _run_album_card_action(
+        app,
+        album_data,
+        "Play",
+        playback.play_album,
+    )
+
+
+def on_album_card_context_action(
+    app,
+    _button: Gtk.Button,
+    popover: Gtk.Popover,
+    action: str,
+    album_data: object,
+) -> None:
+    if popover:
+        popover.popdown()
+    if not album_data:
+        return
+    if action == "Play":
+        app.on_album_card_play_clicked(album_data)
+        return
+    if action == "Play Next":
+        _run_album_card_action(
+            app,
+            album_data,
+            action,
+            playback.play_next,
+        )
+        return
+    if action == "Add to Queue":
+        _run_album_card_action(
+            app,
+            album_data,
+            action,
+            playback.add_to_queue,
+        )
+        return
+    if action == "Start Radio":
+        _run_album_card_action(
+            app,
+            album_data,
+            action,
+            playback.play_radio,
+        )
+        return
+    if action == "Add to Playlist":
+        from ui import album_operations
+
+        thread = threading.Thread(
+            target=album_operations._album_add_to_playlist_worker,
+            args=(app, album_data),
+            daemon=True,
+        )
+        thread.start()
+
+
+def on_artist_row_context_action(
+    app,
+    _button: Gtk.Button,
+    popover: Gtk.Popover,
+    action: str,
+    artist_data: object,
+) -> None:
+    if popover:
+        popover.popdown()
+    if not artist_data:
+        return
+    if action == "View Albums":
+        previous_view = _get_current_view(app)
+        if previous_view == "artist-albums":
+            previous_view = None
+        app.show_artist_albums(artist_data, previous_view)
+        return
+    if action == "Start Radio":
+        _start_artist_radio(app, artist_data)
+
+
+def on_playlist_row_context_action(
+    app,
+    _button: Gtk.Button,
+    popover: Gtk.Popover,
+    action: str,
+    playlist_data: object,
+) -> None:
+    if popover:
+        popover.popdown()
+    if not playlist_data:
+        return
+    if action == "Delete Playlist":
+        from ui import playlist_manager
+
+        playlist_manager.show_delete_playlist_dialog(app, playlist_data)
+        return
+    if action in ("Play", "Add to Queue"):
+        _run_playlist_context_action(app, playlist_data, action)
+
+
+def _run_album_card_action(
+    app,
+    album_data: object,
+    action_label: str,
+    action_fn,
+) -> None:
+    if not app.server_url:
+        from ui import toast
+
+        toast.show_toast(
+            app,
+            "Connect to a server to use this action.",
+            is_error=True,
+        )
+        return
+    thread = threading.Thread(
+        target=_album_card_action_worker,
+        args=(app, album_data, action_label, action_fn),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _album_card_action_worker(
+    app,
+    album_data: object,
+    action_label: str,
+    action_fn,
+) -> None:
+    from ui import album_operations, toast
+
+    error = ""
+    try:
+        media = album_operations._resolve_album_queue_media(app, album_data)
+        preferred_player_id = (
+            app.output_manager.preferred_player_id
+            if app.output_manager
+            else None
+        )
+        if action_fn is playback.play_album:
+            player_id = action_fn(
+                app.client_session,
+                app.server_url,
+                app.auth_token,
+                media,
+                None,
+                preferred_player_id,
+            )
+            if player_id and app.output_manager:
+                app.output_manager.preferred_player_id = player_id
+            _refresh_remote_playback_state(app)
+        else:
+            action_fn(
+                app.client_session,
+                app.server_url,
+                app.auth_token,
+                media,
+                preferred_player_id,
+            )
+            if action_fn is playback.play_radio:
+                _refresh_remote_playback_state(app)
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        GLib.idle_add(
+            toast.show_toast,
+            app,
+            f"{action_label} failed: {error}",
+            True,
+        )
+
+
+def _refresh_remote_playback_state(app) -> None:
+    GLib.idle_add(app.refresh_remote_playback_state)
+
+
+def _run_playlist_context_action(
+    app,
+    playlist_data: object,
+    action: str,
+) -> None:
+    from ui import toast
+
+    if not app.server_url:
+        toast.show_toast(
+            app,
+            "Connect to a server to use this action.",
+            is_error=True,
+        )
+        return
+    media = _resolve_playlist_media(playlist_data)
+    if not media:
+        toast.show_toast(
+            app,
+            "Playlist source is unavailable for this action.",
+            is_error=True,
+        )
+        return
+    thread = threading.Thread(
+        target=_playlist_context_action_worker,
+        args=(app, action, media),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _playlist_context_action_worker(
+    app,
+    action: str,
+    media: object,
+) -> None:
+    from ui import toast
+
+    error = ""
+    preferred_player_id = (
+        app.output_manager.preferred_player_id if app.output_manager else None
+    )
+    try:
+        if action == "Play":
+            playback.play_album(
+                app.client_session,
+                app.server_url,
+                app.auth_token,
+                media,
+                None,
+                preferred_player_id,
+            )
+            _refresh_remote_playback_state(app)
+        else:
+            playback.add_to_queue(
+                app.client_session,
+                app.server_url,
+                app.auth_token,
+                media,
+                preferred_player_id,
+            )
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        GLib.idle_add(
+            toast.show_toast,
+            app,
+            f"{action} failed: {error}",
+            True,
+        )
+
+
+def _start_artist_radio(app, artist_data: object) -> None:
+    from ui import toast
+
+    if not app.server_url:
+        toast.show_toast(
+            app,
+            "Connect to a server to use this action.",
+            is_error=True,
+        )
+        return
+    media = _resolve_artist_media(artist_data)
+    if not media:
+        toast.show_toast(
+            app,
+            "Artist source is unavailable for this action.",
+            is_error=True,
+        )
+        return
+    thread = threading.Thread(
+        target=_artist_radio_worker,
+        args=(app, media),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _artist_radio_worker(app, media: object) -> None:
+    from ui import toast
+
+    error = ""
+    preferred_player_id = (
+        app.output_manager.preferred_player_id if app.output_manager else None
+    )
+    try:
+        playback.play_radio(
+            app.client_session,
+            app.server_url,
+            app.auth_token,
+            media,
+            preferred_player_id,
+        )
+        _refresh_remote_playback_state(app)
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        GLib.idle_add(
+            toast.show_toast,
+            app,
+            f"Start Radio failed: {error}",
+            True,
+        )
+
+
+def _resolve_playlist_media(playlist_data: object) -> object | None:
+    if isinstance(playlist_data, dict):
+        uri = playlist_data.get("uri")
+        if isinstance(uri, str):
+            uri = uri.strip()
+        if uri:
+            return uri
+        item_id = playlist_data.get("item_id") or playlist_data.get("id")
+        provider = (
+            playlist_data.get("provider")
+            or playlist_data.get("provider_instance")
+            or playlist_data.get("provider_domain")
+        )
+    else:
+        uri = getattr(playlist_data, "uri", None)
+        if isinstance(uri, str):
+            uri = uri.strip()
+        if uri:
+            return uri
+        item_id = getattr(playlist_data, "item_id", None) or getattr(
+            playlist_data, "id", None
+        )
+        provider = (
+            getattr(playlist_data, "provider", None)
+            or getattr(playlist_data, "provider_instance", None)
+            or getattr(playlist_data, "provider_domain", None)
+        )
+    if item_id and provider:
+        return {
+            "item_id": item_id,
+            "provider": provider,
+        }
+    return None
+
+
+def _resolve_artist_media(artist_data: object) -> object | None:
+    if isinstance(artist_data, dict):
+        uri = artist_data.get("uri")
+        if isinstance(uri, str):
+            uri = uri.strip()
+        if uri:
+            return uri
+        item_id = artist_data.get("item_id") or artist_data.get("id")
+        provider = (
+            artist_data.get("provider")
+            or artist_data.get("provider_instance")
+            or artist_data.get("provider_domain")
+        )
+    else:
+        uri = getattr(artist_data, "uri", None)
+        if isinstance(uri, str):
+            uri = uri.strip()
+        if uri:
+            return uri
+        item_id = getattr(artist_data, "item_id", None) or getattr(
+            artist_data, "id", None
+        )
+        provider = (
+            getattr(artist_data, "provider", None)
+            or getattr(artist_data, "provider_instance", None)
+            or getattr(artist_data, "provider_domain", None)
+        )
+    if item_id and provider:
+        return {
+            "item_id": item_id,
+            "provider": provider,
+        }
+    return None
+
+
 def _show_now_playing_album(app) -> None:
     album = _resolve_now_playing_album(app)
     if not album:
         return
     album = _hydrate_now_playing_album(app, album)
+    previous_view = _get_current_view(app)
+    if previous_view and previous_view != "album-detail":
+        app.album_detail_previous_view = previous_view
+    app.show_album_detail(album)
+    if app.main_stack:
+        app.main_stack.set_visible_child_name("album-detail")
+
+
+def _show_track_album_detail(app, track: object) -> None:
+    source = getattr(track, "source", None)
+    album = _extract_album_from_source(source)
+    if album:
+        matched = _match_album_in_library(app, album)
+        if matched:
+            album = matched
+        elif isinstance(album, dict) and not _album_has_identity(album):
+            album_name = album.get("name")
+            if not album_name:
+                album_name = getattr(track, "album", None)
+            artist_name = _resolve_artist_name_from_track(
+                source,
+                getattr(track, "artist", None),
+            )
+            matched = _match_album_by_name(app, album_name, artist_name)
+            if matched:
+                album = matched
+    else:
+        album = _match_album_by_name(
+            app,
+            getattr(track, "album", None),
+            getattr(track, "artist", None),
+        )
+    if not album:
+        return
     previous_view = _get_current_view(app)
     if previous_view and previous_view != "album-detail":
         app.album_detail_previous_view = previous_view

@@ -36,6 +36,19 @@ separator {
   color: #e6e9ef;
 }
 
+.control-bar button.mute-button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px;
+  color: #e6e9ef;
+}
+
+.control-bar button.mute-button:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
 .control-bar .eq-button {
   padding: 4px;
 }
@@ -156,6 +169,10 @@ scale slider {
   min-width: 10px;
 }
 
+.seek-scale trough {
+  min-height: 6px;
+}
+
 .sidebar {
   background: #141820;
   border-right: 1px solid #2a303a;
@@ -171,6 +188,19 @@ scale slider {
 
 .sidebar-section-header .section-title {
   padding: 0;
+}
+
+.sidebar-search {
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
+  border-radius: 6px;
+  color: #e6e9ef;
+  font-size: 12px;
+  margin: 4px 10px;
+}
+
+.sidebar-search:focus {
+  border-color: #3a4454;
 }
 
 .playlist-add-button {
@@ -225,6 +255,14 @@ scale slider {
   border: 1px solid #2a303a;
   border-radius: 8px;
   cursor: pointer;
+}
+
+.now-playing-art-thumb {
+  background-color: #1b212b;
+  border: 1px solid #2a303a;
+  border-radius: 4px;
+  min-width: 48px;
+  min-height: 48px;
 }
 
 .sidebar-now-playing-art:hover {
@@ -285,17 +323,6 @@ scale slider {
   color: #f87171;
 }
 
-progressbar trough {
-  background-color: #2a303a;
-  border-radius: 999px;
-  min-height: 6px;
-}
-
-progressbar progress {
-  background-color: #4a90e2;
-  border-radius: 999px;
-}
-
 .sidebar-list {
   background-color: transparent;
 }
@@ -336,38 +363,39 @@ progressbar progress {
 }
 
 .home-section {
-  background-color: #f8fafc;
+  background-color: #111318;
 }
 
 .home-section viewport {
-  background-color: #f8fafc;
+  background-color: #111318;
 }
 
 .home-section-content {
+  background-color: #111318;
   padding: 14px 16px 18px;
 }
 
 .home-title {
-  color: #111827;
+  color: #e6e9ef;
   font-size: 20px;
   font-weight: 700;
   padding: 2px 4px 6px;
 }
 
 .home-card {
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 10px;
   padding: 12px;
 }
 
 .home-card .section-title {
-  color: #1f2937;
+  color: #c3c9d4;
   padding: 0 0 8px;
 }
 
 .home-card .status-label {
-  color: #6b7280;
+  color: #9aa4b2;
   padding: 4px 0 0;
 }
 
@@ -381,7 +409,7 @@ progressbar progress {
 }
 
 .home-grid flowboxchild:hover {
-  background-color: #f1f5f9;
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 .home-album-card .album-title {
@@ -394,28 +422,28 @@ progressbar progress {
 
 .album-section {
   padding: 10px;
-  background-color: #fbfbfb;
+  background-color: #111318;
 }
 
 .album-section scrolledwindow,
 .album-section viewport {
-  background-color: #fbfbfb;
+  background-color: #111318;
 }
 
 .album-section .section-title {
-  color: #1f2937;
+  color: #c3c9d4;
 }
 
 .album-section .status-label {
-  color: #6b7280;
+  color: #9aa4b2;
 }
 
 .search-section {
-  background-color: #fbfbfb;
+  background-color: #111318;
 }
 
 .search-section viewport {
-  background-color: #fbfbfb;
+  background-color: #111318;
 }
 
 .search-section-content {
@@ -436,24 +464,24 @@ progressbar progress {
 }
 
 .search-group {
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 10px;
   padding: 12px;
 }
 
 .search-group .section-title {
-  color: #1f2937;
+  color: #c3c9d4;
   padding: 0 0 8px;
 }
 
 .search-group .status-label {
-  color: #6b7280;
+  color: #9aa4b2;
   padding: 4px 0 0;
 }
 
 .search-scope-toggle label {
-  color: #111827;
+  color: #e6e9ef;
   font-size: 13px;
   font-weight: 600;
 }
@@ -476,11 +504,11 @@ progressbar progress {
 }
 
 .search-grid flowboxchild:hover {
-  background-color: #f1f5f9;
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 .search-group .artist-row label {
-  color: #1f2937;
+  color: #e6e9ef;
 }
 
 .search-artist-list.search-layout-compact .artist-row label {
@@ -492,11 +520,11 @@ progressbar progress {
 }
 
 .search-group .artist-row:hover {
-  background-color: rgba(226, 232, 240, 0.9);
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 .search-group .artist-row:selected {
-  background-color: rgba(219, 234, 254, 0.95);
+  background-color: #2b3442;
 }
 
 .playlist-detail {
@@ -587,19 +615,19 @@ progressbar progress {
 }
 
 .library-loading-overlay {
-  background-color: rgba(251, 251, 251, 0.9);
+  background-color: rgba(17, 19, 24, 0.9);
   background-image: radial-gradient(
     circle,
-    rgba(251, 251, 251, 0.96) 0%,
-    rgba(251, 251, 251, 0.88) 45%,
-    rgba(251, 251, 251, 0.65) 70%,
-    rgba(251, 251, 251, 0.0) 100%
+    rgba(17, 19, 24, 0.96) 0%,
+    rgba(17, 19, 24, 0.88) 45%,
+    rgba(17, 19, 24, 0.65) 70%,
+    rgba(17, 19, 24, 0.0) 100%
   );
 }
 
 .library-loading-shell {
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 999px;
   min-width: 160px;
   min-height: 160px;
@@ -608,11 +636,11 @@ progressbar progress {
 }
 
 .library-loading-spinner {
-  color: #111827;
+  color: #e6e9ef;
 }
 
 .library-loading-label {
-  color: #4b5563;
+  color: #9aa4b2;
   font-size: 12px;
   font-weight: 600;
 }
@@ -626,28 +654,28 @@ progressbar progress {
 }
 
 .album-filter-button {
-  background-color: #e2e8f0;
-  border: 1px solid #cbd5e1;
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 6px;
   padding: 4px 10px;
-  color: #0f172a;
+  color: #e6e9ef;
 }
 
 .album-filter-button label,
 .album-filter-button image {
-  color: #0f172a;
+  color: #e6e9ef;
   font-weight: 600;
 }
 
 .album-filter-button:hover {
-  background-color: #dbe2ea;
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 popover.album-filter-popover > contents {
-  background-color: #f8fafc;
-  border: 1px solid #d1d5db;
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 8px;
-  color: #1f2937;
+  color: #e6e9ef;
 }
 
 .output-title {
@@ -685,11 +713,11 @@ popover.output-popover > contents {
 }
 
 .album-filter-item label {
-  color: #111827;
+  color: #e6e9ef;
 }
 
 .album-filter-item:hover {
-  background-color: #e2e8f0;
+  background-color: rgba(255, 255, 255, 0.08);
   border-radius: 6px;
 }
 
@@ -745,23 +773,23 @@ popover.output-popover > contents {
 }
 
 .artist-back {
-  background: #f1f5f9;
-  border: 1px solid #d1d5db;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(226, 232, 240, 0.3);
   border-radius: 6px;
   box-shadow: none;
   padding: 6px 10px;
-  color: #0f172a;
+  color: #e2e8f0;
 }
 
 .artist-back label,
 .artist-back image {
-  color: #0f172a;
+  color: #e2e8f0;
   font-weight: 600;
 }
 
 .artist-back:hover {
-  background-color: #e2e8f0;
-  border-color: #cbd5e1;
+  background-color: rgba(15, 23, 42, 0.55);
+  border-color: rgba(226, 232, 240, 0.3);
 }
 
 .detail-art {
@@ -779,6 +807,26 @@ popover.output-popover > contents {
 .detail-artist {
   color: #cbd5e1;
   font-size: 13px;
+}
+
+.detail-artist-row {
+  min-height: 22px;
+}
+
+.detail-artist-avatar {
+  background-color: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(226, 232, 240, 0.35);
+  border-radius: 999px;
+}
+
+.detail-meta-box {
+  padding-top: 1px;
+}
+
+.detail-meta {
+  color: #b9c5d7;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .album-detail button.detail-artist-link {
@@ -814,36 +862,36 @@ popover.output-popover > contents {
 }
 
 .track-table {
-  background-color: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(226, 232, 240, 0.85);
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 8px;
-  color: #111827;
+  color: #e6e9ef;
 }
 
 .track-table header {
-  background-color: rgba(226, 232, 240, 0.95);
-  border-bottom: 1px solid rgba(209, 213, 219, 0.9);
-  color: #1f2937;
+  background-color: #212734;
+  border-bottom: 1px solid #2a303a;
+  color: #c3c9d4;
 }
 
 .track-table header button {
   background: transparent;
   border: none;
-  color: #1f2937;
+  color: #c3c9d4;
   font-weight: 600;
   padding: 4px 8px;
 }
 
 .track-table header button:hover {
-  background-color: #dbe2ea;
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .track-table label {
-  color: #111827;
+  color: #e6e9ef;
 }
 
 .track-table header label {
-  color: #1f2937;
+  color: #c3c9d4;
 }
 
 .track-table listview {
@@ -890,17 +938,17 @@ columnview.track-table listview listitem:hover {
 
 .track-table row:nth-child(even),
 .track-table listitem:nth-child(even) {
-  background-color: rgba(248, 250, 252, 0.9);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .track-table listview listitem:selected,
 .track-table row:selected {
-  background-color: rgba(219, 234, 254, 0.95);
+  background-color: #2b3442;
 }
 
 .track-table listview listitem:selected label,
 .track-table row:selected label {
-  color: #0f172a;
+  color: #f1f5f9;
 }
 
 .playing-indicator {
@@ -914,8 +962,8 @@ columnview.track-table listview listitem:hover {
 }
 
 .artist-list {
-  background-color: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(226, 232, 240, 0.85);
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 8px;
 }
 
@@ -924,15 +972,24 @@ columnview.track-table listview listitem:hover {
 }
 
 .artist-list row:nth-child(even) {
-  background-color: rgba(248, 250, 252, 0.9);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .artist-list row:selected {
-  background-color: rgba(219, 234, 254, 0.95);
+  background-color: #2b3442;
 }
 
 .artist-list row:selected label {
-  color: #0f172a;
+  color: #f1f5f9;
+}
+
+.queue-list row.queue-current-item {
+  background-color: #2b3442;
+}
+
+.queue-list row.queue-current-item label {
+  color: #f1f5f9;
+  font-weight: 700;
 }
 
 .artist-list separator {
@@ -942,22 +999,22 @@ columnview.track-table listview listitem:hover {
 }
 
 .track-action-button {
-  background-color: #f1f5f9;
+  background-color: #1a212b;
   background-image: none;
-  border: 1px solid #d1d5db;
+  border: 1px solid #2a303a;
   border-radius: 6px;
   box-shadow: none;
-  color: #64748b;
+  color: #9aa4b2;
   padding: 2px;
 }
 
 .track-action-button image {
-  color: #64748b;
+  color: #9aa4b2;
 }
 
 .track-action-button:hover {
-  background-color: #e2e8f0;
-  border-color: #cbd5e1;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: #2a303a;
 }
 
 .track-action-button:active {
@@ -967,31 +1024,31 @@ columnview.track-table listview listitem:hover {
 
 popover.track-action-popover {
   background-color: transparent;
-  color: #111827;
+  color: #e6e9ef;
 }
 
 popover.track-action-popover > contents {
-  background-color: #f1f5f9;
-  border: 1px solid #d1d5db;
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
   border-radius: 8px;
-  color: #111827;
+  color: #e6e9ef;
 }
 
 .track-action-item {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: #111827;
+  color: #e6e9ef;
   padding: 4px 8px;
 }
 
 .track-action-item label {
-  color: #111827;
+  color: #e6e9ef;
 }
 
 .track-action-item:hover {
-  background-color: #e2e8f0;
-  border-color: #d1d5db;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: #2a303a;
 }
 
 .album-section flowboxchild:selected {
@@ -1012,14 +1069,25 @@ popover.track-action-popover > contents {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.18);
 }
 
+.provider-badge {
+  background-color: rgba(15, 23, 42, 0.74);
+  border: 1px solid rgba(226, 232, 240, 0.38);
+  border-radius: 999px;
+  color: #f8fafc;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+}
+
 .album-title {
   font-weight: 700;
   font-size: 14px;
-  color: #1f2937;
+  color: #e6e9ef;
 }
 
 .album-artist {
-  color: #6b7280;
+  color: #9aa4b2;
   font-size: 12px;
   font-weight: 400;
 }
@@ -1036,17 +1104,67 @@ popover.track-action-popover > contents {
 }
 
 .artist-row label {
-  color: #111827;
+  color: #e6e9ef;
 }
 
 .artist-row:hover {
-  background-color: rgba(226, 232, 240, 0.9);
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 .artist-row:selected {
-  background-color: rgba(219, 234, 254, 0.95);
+  background-color: #2b3442;
 }
 
 .artist-row:selected label {
-  color: #0f172a;
+  color: #f1f5f9;
+}
+
+.artist-avatar {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(226, 232, 240, 0.2);
+  border-radius: 999px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.album-card-play-overlay {
+  background-color: rgba(0, 0, 0, 0.65);
+  border: none;
+  border-radius: 999px;
+  min-width: 44px;
+  min-height: 44px;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.album-card-play-overlay image {
+  color: #ffffff;
+}
+
+.album-card:hover .album-card-play-overlay,
+.album-art-hovered.album-card-play-overlay {
+  opacity: 1;
+}
+
+.toast {
+  background-color: #2b3442;
+  border: 1px solid #3a4454;
+  border-radius: 8px;
+  color: #e6e9ef;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  margin-bottom: 16px;
+  opacity: 1;
+  transition: opacity 200ms ease;
+}
+
+.toast.toast-error {
+  background-color: rgba(248, 113, 113, 0.18);
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fecaca;
+}
+
+.toast.toast-hidden {
+  opacity: 0;
 }

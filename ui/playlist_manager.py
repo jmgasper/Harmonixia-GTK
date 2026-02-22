@@ -1,6 +1,6 @@
 import threading
 
-from gi.repository import Gtk, GLib
+from gi.repository import Gdk, GLib, Gtk
 
 from music_assistant_client.exceptions import (
     CannotConnect,
@@ -104,17 +104,74 @@ def set_playlists_status(app, message: str, is_error: bool = False) -> None:
 def populate_playlists_list(app, playlists: list) -> None:
     if not app.playlists_list:
         return
+    app.playlists = playlists or []
+    apply_playlist_filter(app)
+
+
+def on_playlist_filter_changed(app, _entry: Gtk.Entry) -> None:
+    apply_playlist_filter(app)
+
+
+def apply_playlist_filter(app) -> None:
+    if not app.playlists_list:
+        return
     ui_utils.clear_container(app.playlists_list)
-    playlists = playlists or []
-    app.playlists = playlists
+    playlists = app.playlists or []
+    filter_text = ""
+    filter_entry = getattr(app, "playlists_filter_entry", None)
+    if filter_entry:
+        filter_text = filter_entry.get_text().strip().casefold()
     for playlist in playlists:
-        if isinstance(playlist, dict):
-            name = playlist.get("name") or "Untitled Playlist"
-        else:
-            name = getattr(playlist, "name", None) or str(playlist)
+        name = _get_playlist_name(playlist)
+        if filter_text and not name.casefold().startswith(filter_text):
+            continue
         row = make_sidebar_row(name)
         row.playlist_data = playlist
+        _attach_playlist_row_context_menu(app, row)
         app.playlists_list.append(row)
+
+
+def _attach_playlist_row_context_menu(
+    app, row: Gtk.ListBoxRow
+) -> None:
+    popover = Gtk.Popover()
+    popover.set_has_arrow(False)
+    popover.add_css_class("track-action-popover")
+    action_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    action_box.set_margin_start(6)
+    action_box.set_margin_end(6)
+    action_box.set_margin_top(6)
+    action_box.set_margin_bottom(6)
+    for action in ("Play", "Add to Queue", "Delete Playlist"):
+        action_button = Gtk.Button(label=action)
+        action_button.set_halign(Gtk.Align.FILL)
+        action_button.set_hexpand(True)
+        action_button.add_css_class("track-action-item")
+        action_button.connect(
+            "clicked",
+            app.on_playlist_row_context_action,
+            popover,
+            action,
+            row.playlist_data,
+        )
+        action_box.append(action_button)
+    popover.set_child(action_box)
+    ui_utils.attach_context_popover(row, popover)
+    gesture = Gtk.GestureClick.new()
+    gesture.set_button(3)
+
+    def on_pressed(_gesture, _n_press: int, x: float, y: float) -> None:
+        if hasattr(popover, "set_pointing_to"):
+            rect = Gdk.Rectangle()
+            rect.x = int(x)
+            rect.y = int(y)
+            rect.width = 1
+            rect.height = 1
+            popover.set_pointing_to(rect)
+        popover.popup()
+
+    gesture.connect("pressed", on_pressed)
+    row.add_controller(gesture)
 
 
 def on_playlist_selected(
@@ -678,10 +735,8 @@ def show_add_to_playlist_dialog(app, track) -> None:
             is_error=True,
         )
         return
-    if not track:
-        return
-    track_uri = _get_track_uri(track)
-    if not track_uri:
+    track_uris = _get_track_uris(track)
+    if not track_uris:
         set_playlists_status(
             app,
             "Unable to add track: missing track URI.",
@@ -739,7 +794,7 @@ def show_add_to_playlist_dialog(app, track) -> None:
         if index < 0 or index >= len(playlists):
             return
         dialog.close()
-        add_track_to_playlist(app, track, playlists[index])
+        add_tracks_to_playlist(app, track_uris, playlists[index])
 
     cancel_button.connect("clicked", close_dialog)
     add_button.connect("clicked", submit_dialog)
@@ -748,6 +803,22 @@ def show_add_to_playlist_dialog(app, track) -> None:
 
 
 def add_track_to_playlist(app, track, playlist: dict) -> None:
+    track_uris = _get_track_uris(track)
+    if not track_uris:
+        set_playlists_status(
+            app,
+            "Unable to add track: missing track URI.",
+            is_error=True,
+        )
+        return
+    add_tracks_to_playlist(app, track_uris, playlist)
+
+
+def add_tracks_to_playlist(
+    app,
+    track_uris: list[str],
+    playlist: dict,
+) -> None:
     if not app.server_url:
         set_playlists_status(
             app,
@@ -755,8 +826,7 @@ def add_track_to_playlist(app, track, playlist: dict) -> None:
             is_error=True,
         )
         return
-    track_uri = _get_track_uri(track)
-    if not track_uri:
+    if not track_uris:
         set_playlists_status(
             app,
             "Unable to add track: missing track URI.",
@@ -772,29 +842,34 @@ def add_track_to_playlist(app, track, playlist: dict) -> None:
         )
         return
     playlist_name = _get_playlist_name(playlist)
-    set_playlists_status(app, f"Adding to {playlist_name}...")
+    track_count = len(track_uris)
+    noun = "track" if track_count == 1 else "tracks"
+    set_playlists_status(
+        app,
+        f"Adding {track_count} {noun} to {playlist_name}...",
+    )
     thread = threading.Thread(
-        target=add_track_to_playlist_worker,
-        args=(app, playlist_id, playlist_name, track_uri),
+        target=add_tracks_to_playlist_worker,
+        args=(app, playlist_id, playlist_name, list(track_uris)),
         daemon=True,
     )
     thread.start()
 
 
-def add_track_to_playlist_worker(
+def add_tracks_to_playlist_worker(
     app,
     playlist_id: str | int,
     playlist_name: str,
-    track_uri: str,
+    track_uris: list[str],
 ) -> None:
     error = ""
     try:
         app.client_session.run(
             app.server_url,
             app.auth_token,
-            _add_track_to_playlist_async,
+            _add_tracks_to_playlist_async,
             playlist_id,
-            track_uri,
+            track_uris,
         )
     except AuthenticationRequired:
         error = "Authentication required. Add an access token in Settings."
@@ -809,22 +884,31 @@ def add_track_to_playlist_worker(
     except Exception as exc:
         error = str(exc)
     GLib.idle_add(
-        on_track_added_to_playlist,
+        on_tracks_added_to_playlist,
         app,
         playlist_id,
         playlist_name,
+        len(track_uris),
         error,
     )
 
 
-async def _add_track_to_playlist_async(
-    client, playlist_id: str | int, track_uri: str
+async def _add_tracks_to_playlist_async(
+    client,
+    playlist_id: str | int,
+    track_uris: list[str],
 ) -> None:
-    await client.music.add_playlist_tracks(playlist_id, [track_uri])
+    if not track_uris:
+        return
+    await client.music.add_playlist_tracks(playlist_id, track_uris)
 
 
-def on_track_added_to_playlist(
-    app, playlist_id: str | int, playlist_name: str, error: str
+def on_tracks_added_to_playlist(
+    app,
+    playlist_id: str | int,
+    playlist_name: str,
+    track_count: int,
+    error: str,
 ) -> None:
     if error:
         set_playlists_status(
@@ -833,7 +917,11 @@ def on_track_added_to_playlist(
             is_error=True,
         )
         return
-    set_playlists_status(app, f"Added to {playlist_name}.")
+    noun = "track" if track_count == 1 else "tracks"
+    set_playlists_status(
+        app,
+        f"Added {track_count} {noun} to {playlist_name}.",
+    )
     current = app.current_playlist
     if current and _playlist_id_matches(current, playlist_id):
         app.load_playlist_tracks(current, force_refresh=True)
@@ -842,6 +930,28 @@ def on_track_added_to_playlist(
 def _get_track_uri(track) -> str | None:
     source = getattr(track, "source", None)
     return getattr(source, "uri", None) if source else None
+
+
+def _get_track_uris(track_or_tracks) -> list[str]:
+    if track_or_tracks is None:
+        return []
+    if isinstance(track_or_tracks, (list, tuple, set)):
+        track_items = list(track_or_tracks)
+    else:
+        track_items = [track_or_tracks]
+    uris: list[str] = []
+    seen: set[str] = set()
+    for item in track_items:
+        uri = _get_track_uri(item)
+        if isinstance(uri, str):
+            uri = uri.strip()
+        else:
+            uri = None
+        if not uri or uri in seen:
+            continue
+        seen.add(uri)
+        uris.append(uri)
+    return uris
 
 
 def _get_playlist_name(playlist: object) -> str:

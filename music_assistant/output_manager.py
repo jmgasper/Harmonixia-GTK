@@ -1,8 +1,7 @@
 import asyncio, ctypes, ctypes.util, logging, os, re, threading
-from contextlib import suppress, contextmanager
+from contextlib import contextmanager
 
 from music_assistant_client import MusicAssistantClient
-from music_assistant_models.enums import EventType
 
 Gst = None
 try:
@@ -80,7 +79,7 @@ class OutputManager:
         self.local_device_names = local_device_names or set(); self.on_outputs_changed = on_outputs_changed; self.on_output_selected = on_output_selected; self.on_loading_state_changed = on_loading_state_changed
         self.local_audio_outputs = []; self.local_audio_outputs_by_id = {}; self.local_audio_lock = threading.Lock(); self.output_targets = []; self.output_target_rows = {}; self.sendspin_player_id = None
         self.preferred_player_id = None; self.preferred_local_output_id = None; self.preferred_local_output_name = None; self.output_loading = False; self.status_message = ""
-        self.output_listener_thread = None; self.output_listener_stop = None; self.output_listener_server = None; self._selected_key = None; self._refresh_pending = False; self._refresh_after_load = False
+        self._selected_key = None; self._refresh_pending = False; self._refresh_after_load = False
         self._logger = logging.getLogger(__name__)
 
     def get_local_outputs(self): return list(self.local_audio_outputs)
@@ -97,38 +96,6 @@ class OutputManager:
         if self.output_loading: self._refresh_after_load = True; return
         if not self._get_server_url(): self._set_loading_state(False, "Connect to your Music Assistant server to see outputs."); self.populate_output_targets([]); return
         self._set_loading_state(True, "Loading outputs..."); threading.Thread(target=self._load_output_targets_worker, daemon=True).start()
-
-    def start_monitoring(self):
-        server_url = self._get_server_url()
-        if not server_url: self.stop_monitoring(); return
-        if self.output_listener_thread and self.output_listener_thread.is_alive() and self.output_listener_server == server_url: return
-        self.stop_monitoring(); stop_event = threading.Event(); thread = threading.Thread(target=self._output_listener_worker, args=(server_url, self._get_auth_token(), stop_event), daemon=True)
-        self.output_listener_thread = thread; self.output_listener_stop = stop_event; self.output_listener_server = server_url; thread.start()
-
-    def stop_monitoring(self):
-        if self.output_listener_stop: self.output_listener_stop.set()
-        if self.output_listener_thread and self.output_listener_thread.is_alive(): self.output_listener_thread.join(timeout=1)
-        self.output_listener_thread = None; self.output_listener_stop = None; self.output_listener_server = None
-
-    def _output_listener_worker(self, server_url, auth_token, stop_event):
-        retry_delay = 1.0
-        while not stop_event.is_set():
-            try: asyncio.run(self._output_listener_async(server_url, auth_token, stop_event))
-            except Exception as exc: self._logger.warning("Output listener stopped: %s", exc)
-            if stop_event.is_set(): break
-            stop_event.wait(retry_delay)
-
-    async def _output_listener_async(self, server_url, auth_token, stop_event):
-        token = auth_token or None; client = MusicAssistantClient(server_url, None, token=token)
-        client.subscribe(lambda _event: self.schedule_refresh(), (EventType.PLAYER_ADDED, EventType.PLAYER_UPDATED, EventType.PLAYER_REMOVED))
-        init_ready = asyncio.Event(); listen_task = asyncio.create_task(client.start_listening(init_ready)); ready_task = asyncio.create_task(init_ready.wait())
-        done, _pending = await asyncio.wait({listen_task, ready_task}, return_when=asyncio.FIRST_COMPLETED)
-        if listen_task in done:
-            with suppress(asyncio.CancelledError): await listen_task
-            return
-        ready_task.cancel(); self.schedule_refresh(); loop = asyncio.get_running_loop(); await loop.run_in_executor(None, stop_event.wait)
-        await client.disconnect(); listen_task.cancel()
-        with suppress(asyncio.CancelledError): await listen_task
 
     def _load_output_targets_worker(self):
         try:

@@ -14,7 +14,7 @@ from music_assistant_client.exceptions import (
     MusicAssistantClientException,
 )
 from music_assistant_models.errors import AuthenticationFailed, AuthenticationRequired
-from ui import image_loader, track_utils, ui_utils
+from ui import image_loader, toast, track_utils, ui_utils
 from ui.widgets.track_row import TrackRow
 
 
@@ -555,33 +555,37 @@ def remove_track_from_playlist(app, track) -> None:
     if not playlist:
         return
     if not app.server_url:
-        set_playlist_detail_status(
+        toast.show_toast(
             app,
             "Connect to your Music Assistant server to edit playlists.",
+            is_error=True,
         )
         return
     if not _is_editable_playlist(playlist):
-        set_playlist_detail_status(
+        toast.show_toast(
             app,
             "This playlist cannot be edited.",
+            is_error=True,
         )
         return
     playlist_id = _get_playlist_id(playlist)
     if playlist_id is None:
-        set_playlist_detail_status(
+        toast.show_toast(
             app,
             "Unable to remove track: missing playlist ID.",
+            is_error=True,
         )
         return
     position = _get_track_position(track)
     if position is None:
-        set_playlist_detail_status(
+        toast.show_toast(
             app,
             "Unable to remove track: missing playlist position.",
+            is_error=True,
         )
         return
     playlist_name = get_playlist_name(playlist)
-    set_playlist_detail_status(app, f"Removing from {playlist_name}...")
+    toast.show_toast(app, f"Removing from {playlist_name}...")
     thread = threading.Thread(
         target=_remove_track_from_playlist_worker,
         args=(app, playlist_id, playlist_name, position),
@@ -636,12 +640,13 @@ def on_track_removed_from_playlist(
     app, playlist_id: str | int, playlist_name: str, error: str
 ) -> None:
     if error:
-        set_playlist_detail_status(
+        toast.show_toast(
             app,
             f"Unable to remove track: {error}",
+            is_error=True,
         )
         return
-    set_playlist_detail_status(app, f"Removed from {playlist_name}.")
+    toast.show_toast(app, f"Removed from {playlist_name}.")
     current = app.current_playlist
     if current and _playlist_id_matches(current, playlist_id):
         app.load_playlist_tracks(current, force_refresh=True)

@@ -372,6 +372,13 @@ def load_cached_presets() -> list[dict]:
         return []
     return parse_jsonl(cache_path)
 
+
+def load_presets_from_cache_only() -> list[dict] | None:
+    cache_path = _get_cache_path()
+    if not _is_cache_valid(cache_path):
+        return None
+    return parse_jsonl(cache_path)
+
 def convert_opra_to_gstreamer(preset: dict) -> BandConfigList:
     if not isinstance(preset, dict):
         return BandConfigList()

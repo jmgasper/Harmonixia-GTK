@@ -4,7 +4,7 @@ from constants import SIDEBAR_WIDTH, SIDEBAR_ART_SIZE, SIDEBAR_ACTION_MARGIN
 
 
 def build_sidebar(app) -> Gtk.Widget:
-    from ui import playlist_manager, settings_panel
+    from ui import playlist_manager, settings_panel, ui_utils
 
     sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
@@ -24,6 +24,17 @@ def build_sidebar(app) -> Gtk.Widget:
     home_list.set_margin_bottom(8)
     sidebar.append(home_list)
     app.home_nav_list = home_list
+
+    search_entry = Gtk.SearchEntry()
+    search_entry.add_css_class("sidebar-search")
+    search_entry.set_placeholder_text("Search Library")
+    search_entry.set_margin_start(10)
+    search_entry.set_margin_end(10)
+    search_entry.set_margin_bottom(4)
+    search_entry.connect("search-changed", app.on_search_changed)
+    search_entry.connect("activate", app.on_search_activated)
+    sidebar.append(search_entry)
+    app.search_entry = search_entry
 
     library_label = Gtk.Label(label="Library")
     library_label.add_css_class("section-title")
@@ -74,6 +85,19 @@ def build_sidebar(app) -> Gtk.Widget:
     playlists_header.append(playlists_add)
     sidebar.append(playlists_header)
 
+    playlists_filter_entry = Gtk.Entry()
+    playlists_filter_entry.add_css_class("sidebar-playlist-filter")
+    playlists_filter_entry.set_placeholder_text("Filter playlists")
+    playlists_filter_entry.set_hexpand(True)
+    playlists_filter_entry.set_margin_start(10)
+    playlists_filter_entry.set_margin_end(10)
+    playlists_filter_entry.set_margin_bottom(4)
+    playlists_filter_entry.connect(
+        "changed",
+        lambda entry: playlist_manager.on_playlist_filter_changed(app, entry),
+    )
+    sidebar.append(playlists_filter_entry)
+
     playlists_list = Gtk.ListBox()
     playlists_list.add_css_class("sidebar-list")
     playlists_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
@@ -95,6 +119,7 @@ def build_sidebar(app) -> Gtk.Widget:
     app.playlists_list = playlists_list
     app.playlists_status_label = playlists_status
     app.playlists_add_button = playlists_add
+    app.playlists_filter_entry = playlists_filter_entry
     playlist_manager.refresh_playlists(app)
 
     scroller = Gtk.ScrolledWindow()
@@ -105,9 +130,9 @@ def build_sidebar(app) -> Gtk.Widget:
     now_playing_art = Gtk.Picture()
     now_playing_art.add_css_class("sidebar-now-playing-art")
     now_playing_art.set_size_request(SIDEBAR_ART_SIZE, SIDEBAR_ART_SIZE)
-    now_playing_art.set_halign(Gtk.Align.FILL)
+    now_playing_art.set_halign(Gtk.Align.CENTER)
     now_playing_art.set_valign(Gtk.Align.CENTER)
-    now_playing_art.set_hexpand(True)
+    now_playing_art.set_hexpand(False)
     now_playing_art.set_vexpand(False)
     now_playing_art.set_margin_bottom(4)
     now_playing_art.set_tooltip_text("Now Playing")
@@ -152,7 +177,7 @@ def build_sidebar(app) -> Gtk.Widget:
         action_buttons.append(action_button)
 
     now_playing_popover.set_child(action_box)
-    now_playing_popover.set_parent(now_playing_art)
+    ui_utils.attach_context_popover(now_playing_art, now_playing_popover)
     app.sidebar_now_playing_popover = now_playing_popover
     app.sidebar_now_playing_action_buttons = action_buttons
 
@@ -177,6 +202,12 @@ def build_sidebar(app) -> Gtk.Widget:
     queue_controls.set_homogeneous(True)
     queue_controls.set_margin_bottom(2)
     queue_controls.set_visible(False)
+
+    queue_button = Gtk.Button()
+    queue_button.add_css_class("queue-toggle")
+    queue_button.set_tooltip_text("Queue")
+    queue_button.set_child(Gtk.Image.new_from_icon_name("view-list-symbolic"))
+    queue_button.connect("clicked", app.on_queue_button_clicked)
 
     repeat_button = Gtk.Button()
     repeat_button.add_css_class("queue-toggle")
@@ -208,10 +239,12 @@ def build_sidebar(app) -> Gtk.Widget:
     shuffle_button.set_child(shuffle_stack)
     shuffle_button.connect("clicked", app.on_shuffle_clicked)
 
+    queue_controls.append(queue_button)
     queue_controls.append(repeat_button)
     queue_controls.append(shuffle_button)
 
     app.sidebar_queue_controls = queue_controls
+    app.queue_panel_button = queue_button
     app.repeat_button = repeat_button
     app.repeat_button_stack = repeat_stack
     app.repeat_button_icon = repeat_icon
@@ -224,6 +257,65 @@ def build_sidebar(app) -> Gtk.Widget:
     app.repeat_one_icon_name = repeat_one_icon_name
     app.shuffle_icon_name = shuffle_icon_name
     app.update_queue_controls()
+
+    sleep_timer_button = Gtk.MenuButton()
+    sleep_timer_button.add_css_class("sidebar-action")
+    sleep_timer_button.set_hexpand(True)
+    sleep_timer_button.set_halign(Gtk.Align.FILL)
+    sleep_timer_button.set_tooltip_text("Sleep Timer")
+    sleep_timer_content = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=8,
+    )
+    sleep_timer_icon = Gtk.Image.new_from_icon_name("alarm-symbolic")
+    sleep_timer_label = Gtk.Label(label="Sleep", xalign=0)
+    sleep_timer_content.append(sleep_timer_icon)
+    sleep_timer_content.append(sleep_timer_label)
+    sleep_timer_button.set_child(sleep_timer_content)
+
+    sleep_timer_popover = Gtk.Popover()
+    sleep_timer_popover.set_has_arrow(False)
+    sleep_timer_popover.add_css_class("track-action-popover")
+    sleep_timer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    sleep_timer_box.set_margin_start(6)
+    sleep_timer_box.set_margin_end(6)
+    sleep_timer_box.set_margin_top(6)
+    sleep_timer_box.set_margin_bottom(6)
+    for label, minutes in (
+        ("15 min", 15),
+        ("30 min", 30),
+        ("45 min", 45),
+        ("60 min", 60),
+    ):
+        preset_button = Gtk.Button(label=label)
+        preset_button.set_halign(Gtk.Align.FILL)
+        preset_button.set_hexpand(True)
+        preset_button.add_css_class("track-action-item")
+        preset_button.connect(
+            "clicked",
+            lambda _button, mins=minutes: _on_sleep_timer_selected(
+                app,
+                sleep_timer_popover,
+                mins,
+            ),
+        )
+        sleep_timer_box.append(preset_button)
+    cancel_sleep_button = Gtk.Button(label="Cancel")
+    cancel_sleep_button.set_halign(Gtk.Align.FILL)
+    cancel_sleep_button.set_hexpand(True)
+    cancel_sleep_button.add_css_class("track-action-item")
+    cancel_sleep_button.connect(
+        "clicked",
+        lambda _button: _on_sleep_timer_selected(
+            app,
+            sleep_timer_popover,
+            None,
+        ),
+    )
+    sleep_timer_box.append(cancel_sleep_button)
+    sleep_timer_popover.set_child(sleep_timer_box)
+    sleep_timer_button.set_popover(sleep_timer_popover)
+    app.sleep_timer_button = sleep_timer_button
 
     settings_button = Gtk.Button()
     settings_button.add_css_class("sidebar-action")
@@ -251,6 +343,7 @@ def build_sidebar(app) -> Gtk.Widget:
     action_area.set_margin_end(SIDEBAR_ACTION_MARGIN)
     action_area.append(now_playing_art)
     action_area.append(queue_controls)
+    action_area.append(sleep_timer_button)
     action_area.append(settings_button)
 
     container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -287,3 +380,15 @@ def make_sidebar_row(text: str) -> Gtk.ListBoxRow:
     label.set_margin_bottom(2)
     row.set_child(label)
     return row
+
+
+def _on_sleep_timer_selected(
+    app,
+    popover: Gtk.Popover,
+    minutes: int | None,
+) -> None:
+    if minutes is None:
+        app.cancel_sleep_timer()
+    else:
+        app.start_sleep_timer(int(minutes))
+    popover.popdown()

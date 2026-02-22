@@ -355,6 +355,7 @@ def populate_search_albums(app, albums: list[dict]) -> None:
             artist_label,
             image_url,
             art_size=MEDIA_TILE_SIZE,
+            album_data=album_data,
         )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
@@ -375,9 +376,21 @@ def populate_search_artists(app, artists: list[dict]) -> None:
     for artist in artists:
         if isinstance(artist, dict):
             name = artist.get("name") or "Unknown Artist"
+            image_url = image_loader.extract_media_image_url(
+                artist,
+                app.server_url,
+            )
         else:
             name = str(artist)
-        app.search_artists_list.append(ui_utils.make_artist_row(name, artist))
+            image_url = None
+        app.search_artists_list.append(
+            ui_utils.make_artist_row(
+                name,
+                artist,
+                image_url=image_url,
+                app=app,
+            )
+        )
     app.search_artists_section.set_visible(bool(artists))
 
 

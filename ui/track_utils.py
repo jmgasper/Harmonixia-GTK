@@ -27,6 +27,25 @@ def serialize_track(
 
     quality = describe_track_quality_fn(track)
     if isinstance(track, dict):
+        source_uri = track.get("source_uri") or track.get("uri")
+        source_obj = track.get("source")
+    else:
+        source_uri = getattr(track, "uri", None) or getattr(
+            track, "source_uri", None
+        )
+        source_obj = track
+    if not source_uri:
+        if isinstance(source_obj, dict):
+            source_uri = source_obj.get("uri") or source_obj.get("source_uri")
+        elif source_obj is not None:
+            source_uri = getattr(source_obj, "uri", None) or getattr(
+                source_obj, "source_uri", None
+            )
+    if isinstance(source_uri, str):
+        source_uri = source_uri.strip()
+    if not source_uri:
+        source_uri = None
+    if isinstance(track, dict):
         is_favorite = bool(track.get("favorite", False))
     else:
         is_favorite = bool(getattr(track, "favorite", False))
@@ -40,6 +59,7 @@ def serialize_track(
         "quality": quality,
         "is_favorite": is_favorite,
         "source": track,
+        "source_uri": source_uri,
     }
 
 

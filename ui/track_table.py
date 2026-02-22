@@ -8,6 +8,10 @@ from ui.widgets.track_row import TrackRow
 
 DEFAULT_ACTION_LABELS = (
     "Play",
+    "Play Next",
+    "Add to Queue",
+    "Start Radio",
+    "Go to Album",
     "Add to existing playlist",
     "Add to new playlist",
 )
@@ -41,6 +45,7 @@ def build_tracks_table(
     view_attr: str = "album_tracks_view",
     action_labels: tuple[str, ...] | None = None,
     use_track_art: bool = False,
+    include_album_column: bool = True,
 ) -> Gtk.Widget:
     store = Gio.ListStore.new(TrackRow)
     sort_model = Gtk.SortListModel.new(store, None)
@@ -101,7 +106,8 @@ def build_tracks_table(
     view.append_column(title_column)
     view.append_column(length_column)
     view.append_column(artist_column)
-    view.append_column(album_column)
+    if include_album_column:
+        view.append_column(album_column)
     view.append_column(quality_column)
     view.append_column(actions_column)
 

@@ -2,12 +2,14 @@
 
 import logging
 import threading
+from types import SimpleNamespace
 
 from gi.repository import GLib, Gtk
 
-from constants import DETAIL_ART_SIZE
+from constants import DETAIL_ART_SIZE, DETAIL_ARTIST_AVATAR_SIZE
+from music_assistant import playback
 from music_assistant_client import MusicAssistantClient
-from ui import image_loader, track_utils, ui_utils
+from ui import image_loader, toast, track_utils, ui_utils
 from ui.widgets.track_row import TrackRow
 
 
@@ -33,6 +35,260 @@ def _pick_primary_artist_name(artists: object) -> str | None:
         if name:
             return str(name)
     return None
+
+
+def _coerce_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_year(value: object) -> int | None:
+    if value is None:
+        return None
+    if hasattr(value, "year"):
+        year = _coerce_int(getattr(value, "year", None))
+    elif isinstance(value, str):
+        text = value.strip()
+        if len(text) >= 4 and text[:4].isdigit():
+            year = _coerce_int(text[:4])
+        else:
+            year = _coerce_int(text)
+    else:
+        year = _coerce_int(value)
+    if year is None or year < 1000 or year > 3000:
+        return None
+    return year
+
+
+def _extract_album_field(album: object, names: tuple[str, ...]) -> object | None:
+    for name in names:
+        if isinstance(album, dict):
+            value = album.get(name)
+        else:
+            value = getattr(album, name, None)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _extract_album_release_year(album: object) -> int | None:
+    direct_year = _coerce_year(
+        _extract_album_field(album, ("year", "release_year", "album_year"))
+    )
+    if direct_year:
+        return direct_year
+
+    metadata = _extract_album_field(album, ("metadata",))
+    if isinstance(metadata, dict):
+        release_date = metadata.get("release_date") or metadata.get("year")
+    else:
+        release_date = getattr(metadata, "release_date", None) or getattr(
+            metadata, "year", None
+        )
+    metadata_year = _coerce_year(release_date)
+    if metadata_year:
+        return metadata_year
+
+    release_date = _extract_album_field(album, ("release_date",))
+    return _coerce_year(release_date)
+
+
+def _extract_album_track_count(album: object) -> int | None:
+    count = _coerce_int(
+        _extract_album_field(
+            album,
+            (
+                "track_count",
+                "tracks_count",
+                "total_tracks",
+                "num_tracks",
+                "track_total",
+            ),
+        )
+    )
+    if count is not None and count >= 0:
+        return count
+    if isinstance(album, dict):
+        tracks = album.get("tracks")
+        if isinstance(tracks, (list, tuple, set)):
+            return len(tracks)
+    return None
+
+
+def _extract_album_duration_seconds(album: object) -> int | None:
+    duration = _coerce_int(
+        _extract_album_field(
+            album,
+            (
+                "duration_seconds",
+                "total_duration_seconds",
+                "duration",
+                "total_duration",
+                "album_duration",
+            ),
+        )
+    )
+    if duration is not None and duration >= 0:
+        return duration
+
+    duration_ms = _coerce_int(
+        _extract_album_field(
+            album,
+            (
+                "duration_ms",
+                "total_duration_ms",
+                "album_duration_ms",
+            ),
+        )
+    )
+    if duration_ms is not None and duration_ms >= 0:
+        return int(round(duration_ms / 1000))
+    return None
+
+
+def _resolve_image_candidate(value: object, server_url: str) -> str | None:
+    if not value:
+        return None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if not (
+            "://" in candidate
+            or candidate.startswith("/")
+            or "/" in candidate
+            or "?" in candidate
+        ):
+            return None
+        return image_loader.resolve_image_url(candidate, server_url)
+    return image_loader.extract_media_image_url(value, server_url)
+
+
+def _extract_primary_artist_image_url(album: object, server_url: str) -> str | None:
+    direct = _extract_album_field(
+        album,
+        (
+            "artist_image_url",
+            "primary_artist_image_url",
+            "artist_image",
+            "primary_artist_image",
+        ),
+    )
+    resolved = _resolve_image_candidate(direct, server_url)
+    if resolved:
+        return resolved
+
+    if isinstance(album, dict):
+        artists = album.get("artists")
+    else:
+        artists = getattr(album, "artists", None)
+    if not artists:
+        return None
+    if isinstance(artists, (str, dict)):
+        artists = [artists]
+    for artist in artists:
+        resolved = _resolve_image_candidate(artist, server_url)
+        if resolved:
+            return resolved
+    return None
+
+
+def _set_album_artist_image(app, image_url: str | None) -> None:
+    picture = getattr(app, "album_detail_artist_image", None)
+    if not picture:
+        return
+    picture.set_paintable(None)
+    if not image_url:
+        picture.set_visible(False)
+        try:
+            picture.expected_image_url = None
+        except Exception:
+            pass
+        return
+    picture.set_visible(True)
+    image_loader.load_album_art_async(
+        picture,
+        image_url,
+        DETAIL_ARTIST_AVATAR_SIZE,
+        app.auth_token,
+        app.image_executor,
+        app.get_cache_dir(),
+    )
+
+
+def _set_album_release_year_label(app, year: int | None) -> None:
+    label = getattr(app, "album_detail_release_year", None)
+    if not label:
+        return
+    text = str(year) if year else ""
+    label.set_label(text)
+    label.set_visible(bool(text))
+
+
+def _format_album_track_summary(
+    track_count: int | None, duration_seconds: int | None
+) -> str:
+    parts: list[str] = []
+    if track_count is not None and track_count > 0:
+        suffix = "track" if track_count == 1 else "tracks"
+        parts.append(f"{track_count} {suffix}")
+    if duration_seconds is not None and duration_seconds > 0:
+        parts.append(track_utils.format_duration(duration_seconds))
+    return "  ".join(parts)
+
+
+def _set_album_track_summary_label(app, text: str) -> None:
+    label = getattr(app, "album_detail_track_summary", None)
+    if not label:
+        return
+    label.set_label(text)
+    label.set_visible(bool(text))
+
+
+def _compute_track_totals(tracks: list[dict]) -> tuple[int, int]:
+    count = len(tracks)
+    duration = 0
+    for track in tracks:
+        seconds = _coerce_int(track.get("length_seconds"))
+        if seconds and seconds > 0:
+            duration += seconds
+    return count, duration
+
+
+def _apply_album_detail_metadata(
+    app, album: object, tracks: list[dict] | None = None
+) -> None:
+    year = _extract_album_release_year(album)
+    _set_album_release_year_label(app, year)
+
+    track_count = _extract_album_track_count(album)
+    duration_seconds = _extract_album_duration_seconds(album)
+
+    if tracks:
+        computed_count, computed_duration = _compute_track_totals(tracks)
+        if computed_count >= 0:
+            track_count = computed_count
+        if computed_duration > 0:
+            duration_seconds = computed_duration
+
+    summary = _format_album_track_summary(track_count, duration_seconds)
+    _set_album_track_summary_label(app, summary)
 
 
 def show_album_detail(app, album: dict) -> None:
@@ -68,11 +324,12 @@ def show_album_detail(app, album: dict) -> None:
     if app.album_detail_artist_button:
         primary_artist = _pick_primary_artist_name(artists)
         app.album_detail_artist_button.set_sensitive(bool(primary_artist))
-    image_url = (
-        image_loader.extract_album_image_url(album, app.server_url)
-        if isinstance(album, dict)
-        else None
-    )
+
+    _apply_album_detail_metadata(app, album)
+    artist_image_url = _extract_primary_artist_image_url(album, app.server_url)
+    _set_album_artist_image(app, artist_image_url)
+
+    image_url = image_loader.extract_media_image_url(album, app.server_url)
     if app.album_detail_art:
         app.album_detail_art.set_paintable(None)
         if image_url:
@@ -141,6 +398,7 @@ def load_album_tracks(app, album: object) -> None:
             album, ui_utils.format_artist_names, track_utils.format_duration
         )
         populate_track_table(app, tracks)
+        _apply_album_detail_metadata(app, album, tracks)
         set_album_detail_status(app, "")
         return
 
@@ -150,6 +408,7 @@ def load_album_tracks(app, album: object) -> None:
     )
     if not candidates or not app.server_url:
         populate_track_table(app, [])
+        _apply_album_detail_metadata(app, album, [])
         set_album_detail_status(
             app,
             "Track details are unavailable for this album.",
@@ -190,20 +449,14 @@ async def _fetch_album_tracks_async(
     had_success = False
     last_error: Exception | None = None
     for item_id, provider in candidates:
+        logging.getLogger(__name__).debug(
+            "Fetching tracks: provider=%s item_id=%s",
+            provider,
+            item_id,
+        )
+    for item_id, provider in candidates:
         try:
-            logging.getLogger(__name__).debug(
-                "Fetching tracks: provider=%s item_id=%s",
-                provider,
-                item_id,
-            )
-            tracks = await client.music.get_album_tracks(item_id, provider)
-            had_success = True
-            logging.getLogger(__name__).debug(
-                "Track response: provider=%s item_id=%s count=%s",
-                provider,
-                item_id,
-                len(tracks),
-            )
+            result = await client.music.get_album_tracks(item_id, provider)
         except Exception as exc:
             last_error = exc
             logging.getLogger(__name__).debug(
@@ -213,6 +466,14 @@ async def _fetch_album_tracks_async(
                 exc,
             )
             continue
+        had_success = True
+        tracks = result
+        logging.getLogger(__name__).debug(
+            "Track response: provider=%s item_id=%s count=%s",
+            provider,
+            item_id,
+            len(tracks),
+        )
         if tracks:
             break
     if not had_success and last_error:
@@ -248,9 +509,11 @@ def on_album_tracks_loaded(
             "Track load error for %s: %s", get_album_name(album), error
         )
         populate_track_table(app, [])
+        _apply_album_detail_metadata(app, album, [])
         set_album_detail_status(app, f"Unable to load tracks: {error}")
         return
     populate_track_table(app, tracks)
+    _apply_album_detail_metadata(app, album, tracks)
     if tracks:
         set_album_detail_status(app, "")
     else:
@@ -331,6 +594,249 @@ def on_album_play_clicked(app, _button: Gtk.Button) -> None:
         return
     album_name = get_album_name(app.current_album)
     logging.getLogger(__name__).info("Play album: %s", album_name)
+
+
+def on_album_add_to_queue_clicked(app, _button: Gtk.Button) -> None:
+    _start_album_queue_action(
+        app,
+        playback.add_to_queue,
+        "Add to Queue",
+        "Adding album to queue...",
+    )
+
+
+def on_album_add_to_playlist_clicked(app, _button: Gtk.Button) -> None:
+    album = getattr(app, "current_album", None)
+    if not album:
+        toast.show_toast(app, "No album selected.", is_error=True)
+        return
+    if not app.server_url:
+        toast.show_toast(
+            app,
+            "Connect to a server to use this action.",
+            is_error=True,
+        )
+        return
+    toast.show_toast(app, "Loading album tracks...")
+    thread = threading.Thread(
+        target=_album_add_to_playlist_worker,
+        args=(app, album),
+        daemon=True,
+    )
+    thread.start()
+
+
+def on_album_start_radio_clicked(app, _button: Gtk.Button) -> None:
+    _start_album_queue_action(
+        app,
+        playback.play_radio,
+        "Start Radio",
+        "Starting album radio...",
+    )
+
+
+def _start_album_queue_action(
+    app,
+    action_fn,
+    action_label: str,
+    pending_message: str,
+) -> None:
+    album = getattr(app, "current_album", None)
+    if not album:
+        toast.show_toast(app, "No album selected.", is_error=True)
+        return
+    if not app.server_url:
+        toast.show_toast(
+            app,
+            "Connect to a server to use this action.",
+            is_error=True,
+        )
+        return
+    toast.show_toast(app, pending_message)
+    thread = threading.Thread(
+        target=_album_queue_action_worker,
+        args=(app, album, action_fn, action_label),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _album_queue_action_worker(app, album: object, action_fn, action_label: str) -> None:
+    error = ""
+    try:
+        media = _resolve_album_queue_media(app, album)
+        action_fn(
+            app.client_session,
+            app.server_url,
+            app.auth_token,
+            media,
+            app.output_manager.preferred_player_id
+            if app.output_manager
+            else None,
+        )
+        if action_fn is playback.play_radio:
+            GLib.idle_add(app.refresh_remote_playback_state)
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        logging.getLogger(__name__).warning(
+            "%s failed for %s: %s",
+            action_label,
+            get_album_name(album),
+            error,
+        )
+        GLib.idle_add(
+            toast.show_toast,
+            app,
+            f"{action_label} failed: {error}",
+            True,
+        )
+        return
+    GLib.idle_add(toast.show_toast, app, f"{action_label} complete.")
+
+
+def _set_album_action_status_if_current(
+    app,
+    album: object,
+    message: str,
+) -> bool:
+    if is_same_album(app, album, app.current_album):
+        set_album_detail_status(app, message)
+    return False
+
+
+def _album_add_to_playlist_worker(app, album: object) -> None:
+    error = ""
+    track_rows: list[TrackRow] = []
+    try:
+        candidates = get_album_track_candidates(album)
+        if not candidates:
+            raise RuntimeError("Track details are unavailable for this album.")
+        tracks = app.client_session.run(
+            app.server_url,
+            app.auth_token,
+            app._fetch_album_tracks_async,
+            candidates,
+            album,
+        )
+        track_rows = _build_playlist_track_rows(tracks)
+        if not track_rows:
+            raise RuntimeError("No tracks available for this album.")
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        GLib.idle_add(
+            toast.show_toast,
+            app,
+            f"Add to Playlist failed: {error}",
+            True,
+        )
+        return
+    GLib.idle_add(_show_add_album_to_playlist_dialog, app, album, track_rows)
+
+
+def _build_playlist_track_rows(tracks: list[dict]) -> list[TrackRow]:
+    rows: list[TrackRow] = []
+    for track in tracks:
+        source = track.get("source")
+        source_uri = track.get("source_uri")
+        if not source_uri and source is not None:
+            source_uri = getattr(source, "uri", None)
+        if isinstance(source_uri, str):
+            source_uri = source_uri.strip()
+        if not source_uri:
+            continue
+        if source is None or not getattr(source, "uri", None):
+            source = SimpleNamespace(uri=source_uri)
+        row = TrackRow(
+            track_number=track.get("track_number", 0),
+            title=track.get("title", ""),
+            length_display=track.get("length_display", ""),
+            length_seconds=track.get("length_seconds", 0),
+            artist=track.get("artist", ""),
+            album=track.get("album", ""),
+            quality=track.get("quality", ""),
+            is_favorite=bool(track.get("is_favorite", False)),
+        )
+        row.source = source
+        rows.append(row)
+    return rows
+
+
+def _show_add_album_to_playlist_dialog(
+    app,
+    album: object,
+    track_rows: list[TrackRow],
+) -> bool:
+    if is_same_album(app, album, app.current_album):
+        set_album_detail_status(app, "")
+    from ui import playlist_manager
+
+    playlist_manager.show_add_to_playlist_dialog(app, track_rows)
+    return False
+
+
+def _resolve_album_queue_media(app, album: object) -> object:
+    tracks: list[dict] = []
+    track_error: Exception | None = None
+    candidates = get_album_track_candidates(album)
+    if candidates:
+        try:
+            tracks = app.client_session.run(
+                app.server_url,
+                app.auth_token,
+                app._fetch_album_tracks_async,
+                candidates,
+                album,
+            )
+        except Exception as exc:
+            track_error = exc
+            logging.getLogger(__name__).debug(
+                "Track URI fetch failed for %s: %s",
+                get_album_name(album),
+                exc,
+            )
+
+    media: object = playback.build_media_uri_list(tracks)
+    if media:
+        return media
+
+    media = _resolve_album_media(album)
+    if media:
+        return media
+
+    if track_error:
+        raise RuntimeError(str(track_error))
+    raise RuntimeError("Album source URI unavailable")
+
+
+def _resolve_album_media(album: object) -> object | None:
+    if isinstance(album, dict):
+        uri = album.get("uri")
+        item_id = album.get("item_id") or album.get("id")
+        provider = (
+            album.get("provider")
+            or album.get("provider_instance")
+            or album.get("provider_domain")
+        )
+    else:
+        uri = getattr(album, "uri", None)
+        item_id = getattr(album, "item_id", None) or getattr(album, "id", None)
+        provider = (
+            getattr(album, "provider", None)
+            or getattr(album, "provider_instance", None)
+            or getattr(album, "provider_domain", None)
+        )
+    if isinstance(uri, str):
+        uri = uri.strip()
+    if uri:
+        return uri
+    if item_id and provider:
+        return {
+            "item_id": item_id,
+            "provider": provider,
+        }
+    return None
 
 
 def get_album_name(album: object) -> str:

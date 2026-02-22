@@ -95,13 +95,40 @@ class SendspinManager:
 
     async def _sendspin_run(self, client, stop_event):
         disconnect_event = asyncio.Event()
-        async def on_disconnect(): disconnect_event.set()
-        client.set_disconnect_listener(on_disconnect)
-        client.set_stream_start_listener(self._on_sendspin_stream_start)
-        client.set_stream_end_listener(self._on_sendspin_stream_end)
-        client.set_stream_clear_listener(self._on_sendspin_stream_clear)
-        client.set_audio_chunk_listener(self._on_sendspin_audio_chunk)
-        client.set_server_command_listener(self._on_sendspin_server_command)
+
+        def on_disconnect():
+            disconnect_event.set()
+
+        self._register_sendspin_listener(
+            client,
+            "disconnect",
+            on_disconnect,
+        )
+        self._register_sendspin_listener(
+            client,
+            "stream_start",
+            self._on_sendspin_stream_start,
+        )
+        self._register_sendspin_listener(
+            client,
+            "stream_end",
+            self._on_sendspin_stream_end,
+        )
+        self._register_sendspin_listener(
+            client,
+            "stream_clear",
+            self._on_sendspin_stream_clear,
+        )
+        self._register_sendspin_listener(
+            client,
+            "audio_chunk",
+            self._on_sendspin_audio_chunk,
+        )
+        self._register_sendspin_listener(
+            client,
+            "server_command",
+            self._on_sendspin_server_command,
+        )
         state_task = asyncio.create_task(self._sendspin_state_loop(client, stop_event))
         try:
             while not stop_event.is_set():
@@ -110,6 +137,20 @@ class SendspinManager:
         finally:
             state_task.cancel()
             with suppress(asyncio.CancelledError): await state_task
+
+    @staticmethod
+    def _register_sendspin_listener(client, event_name, callback):
+        add_method = getattr(client, f"add_{event_name}_listener", None)
+        if callable(add_method):
+            add_method(callback)
+            return
+        set_method = getattr(client, f"set_{event_name}_listener", None)
+        if callable(set_method):
+            set_method(callback)
+            return
+        raise RuntimeError(
+            f"Sendspin client does not support {event_name} listener registration"
+        )
 
     def build_sendspin_client(self):
         self.ensure_client_id(); supported_formats = self.build_sendspin_supported_formats()

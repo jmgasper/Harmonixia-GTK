@@ -72,12 +72,18 @@ def _load_library_worker(app) -> None:
     albums: list[dict] = []
     artists: list[dict] = []
     playlists: list[dict] = []
+    favorite_filter = (
+        True if getattr(app, "album_filter_favorite_only", False) else None
+    )
     try:
         GLib.idle_add(app.set_loading_message, "Loading albums...")
+        album_order = getattr(app, "album_sort_order", None) or "sort_name"
         albums, artists, playlists = app.client_session.run(
             app.server_url,
             app.auth_token,
             library.load_library_data,
+            favorite_filter,
+            album_order,
         )
     except AuthenticationRequired:
         error = "Authentication required. Add an access token in Settings."
@@ -144,6 +150,13 @@ def on_library_loaded(
     app.refresh_output_targets()
 
 
+def _handle_library_change_refresh(app) -> bool:
+    app._library_refresh_source_id = None
+    app._library_refresh_pending = False
+    app.load_library()
+    return False
+
+
 def set_loading_state(app, loading: bool, message: str = "") -> None:
     if loading:
         if app.library_loading_overlay:
@@ -162,6 +175,10 @@ def set_loading_state(app, loading: bool, message: str = "") -> None:
 
     if app.settings_connect_button:
         app.settings_connect_button.set_sensitive(not loading)
+    if getattr(app, "albums_refresh_button", None):
+        app.albums_refresh_button.set_sensitive(not loading)
+    if getattr(app, "artists_refresh_button", None):
+        app.artists_refresh_button.set_sensitive(not loading)
 
 
 def set_loading_message(app, message: str) -> None:
@@ -186,7 +203,7 @@ def set_status(app, message: str, is_error: bool = False) -> None:
 def populate_artists_list(app, artists: list) -> None:
     if not app.artists_list:
         return
-    from ui import ui_utils
+    from ui import image_loader, ui_utils
 
     ui_utils.clear_container(app.artists_list)
     for artist in artists:
@@ -194,19 +211,46 @@ def populate_artists_list(app, artists: list) -> None:
             name = artist.get("name") or "Unknown Artist"
         else:
             name = str(artist)
-        app.artists_list.append(ui_utils.make_artist_row(name, artist))
+        image_url = (
+            image_loader.extract_media_image_url(artist, app.server_url)
+            if isinstance(artist, dict)
+            else None
+        )
+        app.artists_list.append(
+            ui_utils.make_artist_row(
+                name,
+                artist,
+                image_url=image_url,
+                app=app,
+            )
+        )
 
 
 def build_artists_section(app) -> Gtk.Widget:
     artists_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+    header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    header_row.set_halign(Gtk.Align.FILL)
+    header_row.set_hexpand(True)
 
     header = Gtk.Label(label="Artists")
     header.add_css_class("artists-header")
     header.set_xalign(0)
     header.set_hexpand(True)
     header.set_halign(Gtk.Align.FILL)
+    header_row.append(header)
+
+    refresh_button = Gtk.Button()
+    refresh_button.add_css_class("flat")
+    refresh_button.set_tooltip_text("Refresh library")
+    refresh_button.set_child(Gtk.Image.new_from_icon_name("view-refresh-symbolic"))
+    refresh_button.connect("clicked", lambda _button: app.load_library())
+    refresh_button.set_sensitive(not bool(getattr(app, "library_loading", False)))
+    app.artists_refresh_button = refresh_button
+    header_row.append(refresh_button)
+
     app.artists_header = header
-    artists_box.append(header)
+    artists_box.append(header_row)
 
     artists_list = Gtk.ListBox()
     artists_list.add_css_class("artist-list")

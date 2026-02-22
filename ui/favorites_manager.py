@@ -7,7 +7,7 @@ from gi.repository import GLib
 from music_assistant_client import MusicAssistantClient
 from music_assistant_models.enums import MediaType
 
-from ui import image_loader, track_utils, ui_utils
+from ui import image_loader, toast, track_utils, ui_utils
 from ui.widgets.track_row import TrackRow
 
 EMPTY_FAVORITES_MESSAGE = "No favorited tracks yet."
@@ -271,17 +271,17 @@ def on_favorite_action_completed(
     _set_track_favorite_state(track, is_favorite)
     if not is_favorite and _is_favorites_visible(app):
         _remove_favorite_row(app, track)
+    if is_favorite:
+        toast.show_toast(app, "Added to favorites.")
+    else:
+        toast.show_toast(app, "Removed from favorites.")
     if _is_favorites_visible(app):
-        if is_favorite:
-            app.set_favorites_status("Added to favorites.")
-        else:
-            if (
-                app.favorites_tracks_store
-                and app.favorites_tracks_store.get_n_items() == 0
-            ):
-                app.set_favorites_status(EMPTY_FAVORITES_MESSAGE)
-            else:
-                app.set_favorites_status("Removed from favorites.")
+        if (
+            not is_favorite
+            and app.favorites_tracks_store
+            and app.favorites_tracks_store.get_n_items() == 0
+        ):
+            app.set_favorites_status(EMPTY_FAVORITES_MESSAGE)
 
 
 def _set_track_favorite_state(track: TrackRow, is_favorite: bool) -> None:
@@ -346,11 +346,4 @@ def _is_favorites_visible(app) -> bool:
 def _notify_favorite_action(
     app, message: str, is_error: bool = False
 ) -> None:
-    if _is_favorites_visible(app):
-        app.set_favorites_status(message, is_error=is_error)
-        return
-    logger = logging.getLogger(__name__)
-    if is_error:
-        logger.warning(message)
-    else:
-        logger.info(message)
+    toast.show_toast(app, message, is_error=is_error)

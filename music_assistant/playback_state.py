@@ -1,15 +1,18 @@
 """Playback state management and queue helpers."""
 
+import asyncio
 import logging
 import os
 import threading
 import time
+from contextlib import suppress
 
 from gi.repository import GLib
 
 from constants import SIDEBAR_ART_SIZE
 from music_assistant import playback
-from music_assistant_models.enums import PlaybackState
+from music_assistant_client import MusicAssistantClient
+from music_assistant_models.enums import EventType, PlaybackState
 from ui import image_loader, track_utils, ui_utils
 from ui.widgets.track_row import TrackRow
 
@@ -297,6 +300,7 @@ def update_now_playing(app) -> None:
         )
     _update_now_playing_provider(app)
     app.update_sidebar_now_playing_art()
+    app.update_now_playing_art_thumb()
 
 
 def _update_now_playing_provider(app) -> None:
@@ -557,23 +561,7 @@ def update_sidebar_now_playing_art(app) -> None:
     artist = app.playback_track_info.get("artist") or "Unknown Artist"
     app.sidebar_now_playing_art.set_tooltip_text(f"{title} - {artist}")
 
-    image_url = app.playback_track_info.get("image_url")
-    if image_url:
-        resolved = image_loader.resolve_image_url(image_url, app.server_url)
-        if resolved:
-            image_url = resolved
-    if not image_url:
-        source = app.playback_track_info.get("source")
-        if source:
-            image_url = image_loader.extract_media_image_url(
-                source,
-                app.server_url,
-            )
-    if not image_url and app.playback_album:
-        image_url = image_loader.extract_media_image_url(
-            app.playback_album,
-            app.server_url,
-        )
+    image_url = _resolve_now_playing_image_url(app)
     if not image_url:
         app.sidebar_now_playing_art.set_paintable(None)
         app.sidebar_now_playing_art_url = None
@@ -601,9 +589,75 @@ def update_sidebar_now_playing_art(app) -> None:
     )
 
 
+def update_now_playing_art_thumb(app) -> None:
+    thumb = getattr(app, "now_playing_art_thumb", None)
+    if not thumb:
+        return
+    if not app.playback_track_info:
+        thumb.set_visible(False)
+        thumb.set_paintable(None)
+        app.now_playing_art_thumb_url = None
+        try:
+            thumb.expected_image_url = None
+        except Exception:
+            pass
+        return
+    image_url = _resolve_now_playing_image_url(app)
+    if not image_url:
+        thumb.set_visible(False)
+        thumb.set_paintable(None)
+        app.now_playing_art_thumb_url = None
+        try:
+            thumb.expected_image_url = None
+        except Exception:
+            pass
+        return
+    thumb.set_visible(True)
+    if getattr(app, "now_playing_art_thumb_url", None) == image_url:
+        try:
+            current_paintable = thumb.get_paintable()
+        except Exception:
+            current_paintable = None
+        if current_paintable is not None:
+            return
+    app.now_playing_art_thumb_url = image_url
+    thumb.set_paintable(None)
+    image_loader.load_album_art_async(
+        thumb,
+        image_url,
+        48,
+        app.auth_token,
+        app.image_executor,
+        app.get_cache_dir(),
+    )
+
+
+def _resolve_now_playing_image_url(app) -> str | None:
+    image_url = None
+    if app.playback_track_info:
+        image_url = app.playback_track_info.get("image_url")
+    if image_url:
+        resolved = image_loader.resolve_image_url(image_url, app.server_url)
+        if resolved:
+            image_url = resolved
+    if not image_url and app.playback_track_info:
+        source = app.playback_track_info.get("source")
+        if source:
+            image_url = image_loader.extract_media_image_url(
+                source,
+                app.server_url,
+            )
+    if not image_url and app.playback_album:
+        image_url = image_loader.extract_media_image_url(
+            app.playback_album,
+            app.server_url,
+        )
+    return image_url
+
+
 def update_playback_progress_ui(app) -> None:
     if (
-        not app.playback_progress_bar
+        not app.playback_seek_scale
         or not app.playback_time_current_label
         or not app.playback_time_total_label
     ):
@@ -619,29 +673,249 @@ def update_playback_progress_ui(app) -> None:
     fraction = 0.0
     if duration:
         fraction = max(0.0, min(1.0, elapsed / duration))
-    app.playback_progress_bar.set_fraction(fraction)
+    if not getattr(app, "seek_dragging", False):
+        app.playback_seek_scale.set_value(fraction)
 
 
-def ensure_remote_playback_sync(app, interval_ms: int = 2000) -> None:
-    if app.playback_sync_id is not None:
+def _build_remote_playback_payload(queue: object | None) -> dict:
+    if not queue:
+        return {
+            "state": None,
+            "elapsed": None,
+            "current_item": None,
+            "current_index": None,
+            "repeat_mode": None,
+            "shuffle_enabled": None,
+        }
+    shuffle_enabled = getattr(queue, "shuffle_enabled", None)
+    if shuffle_enabled is None:
+        shuffle_enabled = getattr(queue, "shuffle", None)
+    return {
+        "state": getattr(queue, "state", None),
+        "elapsed": getattr(queue, "elapsed_time", None),
+        "current_item": getattr(queue, "current_item", None),
+        "current_index": getattr(queue, "current_index", None),
+        "repeat_mode": getattr(queue, "repeat_mode", None),
+        "shuffle_enabled": shuffle_enabled,
+    }
+
+
+def _start_playback_listener(app) -> None:
+    server_url = app.server_url
+    auth_token = app.auth_token or ""
+    if not server_url:
+        app._stop_playback_listener()
         return
+    if (
+        app._playback_listener_thread
+        and app._playback_listener_thread.is_alive()
+        and app._playback_listener_server == server_url
+        and getattr(app, "_playback_listener_auth_token", None)
+        == auth_token
+    ):
+        return
+    app._stop_playback_listener()
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=app._playback_listener_worker,
+        args=(server_url, auth_token, stop_event),
+        daemon=True,
+    )
+    app._playback_listener_thread = thread
+    app._playback_listener_stop = stop_event
+    app._playback_listener_server = server_url
+    app._playback_listener_auth_token = auth_token
+    thread.start()
+
+
+def _stop_playback_listener(app) -> None:
+    if app._playback_listener_stop:
+        app._playback_listener_stop.set()
+    if (
+        app._playback_listener_thread
+        and app._playback_listener_thread.is_alive()
+    ):
+        app._playback_listener_thread.join(timeout=1)
+    app._playback_listener_thread = None
+    app._playback_listener_stop = None
+    app._playback_listener_server = None
+    app._playback_listener_auth_token = None
+
+
+def _playback_listener_worker(
+    app,
+    server_url: str,
+    auth_token: str,
+    stop_event: threading.Event,
+) -> None:
+    retry_delay = 1.0
+    while not stop_event.is_set():
+        try:
+            asyncio.run(
+                app._playback_listener_async(
+                    server_url,
+                    auth_token,
+                    stop_event,
+                )
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Playback listener stopped: %s",
+                exc,
+            )
+        if stop_event.is_set():
+            break
+        stop_event.wait(retry_delay)
+
+
+def _handle_library_change_refresh(app) -> bool:
+    handler = getattr(app, "_handle_library_change_refresh", None)
+    if callable(handler):
+        result = handler()
+        return bool(result)
+    from music_assistant import library_manager
+
+    return bool(library_manager._handle_library_change_refresh(app))
+
+
+async def _playback_listener_async(
+    app,
+    server_url: str,
+    auth_token: str,
+    stop_event: threading.Event,
+) -> None:
+    token = auth_token or None
+    client = MusicAssistantClient(server_url, None, token=token)
+
+    async def _handle_event(event: object) -> None:
+        try:
+            event_type = getattr(event, "event", None)
+            data = getattr(event, "data", None)
+            if event_type in (
+                EventType.PLAYER_ADDED,
+                EventType.PLAYER_UPDATED,
+                EventType.PLAYER_REMOVED,
+            ):
+                if app.output_manager:
+                    GLib.idle_add(app.output_manager.schedule_refresh)
+            if event_type in (
+                EventType.MEDIA_ITEM_ADDED,
+                EventType.MEDIA_ITEM_UPDATED,
+                EventType.MEDIA_ITEM_DELETED,
+            ):
+                app._library_refresh_pending = True
+                if app._library_refresh_source_id is None:
+                    app._library_refresh_source_id = GLib.timeout_add(
+                        3000,
+                        _handle_library_change_refresh,
+                        app,
+                    )
+                return
+            preferred_player_id = (
+                app.output_manager.preferred_player_id
+                if app.output_manager
+                else None
+            )
+            if event_type == EventType.QUEUE_UPDATED:
+                queue_id = getattr(data, "queue_id", None)
+                if preferred_player_id and queue_id != preferred_player_id:
+                    return
+                payload = _build_remote_playback_payload(data)
+                GLib.idle_add(app._apply_remote_playback_state, payload, "")
+                return
+            if event_type != EventType.PLAYER_UPDATED:
+                return
+            player_id = getattr(data, "player_id", None)
+            if preferred_player_id and player_id != preferred_player_id:
+                return
+            if not player_id:
+                return
+            queue = await client.player_queues.get_active_queue(player_id)
+            payload = _build_remote_playback_payload(queue)
+            GLib.idle_add(app._apply_remote_playback_state, payload, "")
+        except Exception as exc:
+            logging.getLogger(__name__).debug(
+                "Playback event handling failed: %s",
+                exc,
+            )
+
+    def _on_event(event: object) -> None:
+        asyncio.create_task(_handle_event(event))
+
+    client.subscribe(
+        _on_event,
+        (
+            EventType.QUEUE_UPDATED,
+            EventType.PLAYER_UPDATED,
+            EventType.PLAYER_ADDED,
+            EventType.PLAYER_REMOVED,
+            EventType.MEDIA_ITEM_ADDED,
+            EventType.MEDIA_ITEM_UPDATED,
+            EventType.MEDIA_ITEM_DELETED,
+        ),
+    )
+    init_ready = asyncio.Event()
+    listen_task = asyncio.create_task(client.start_listening(init_ready))
+    ready_task = asyncio.create_task(init_ready.wait())
+    done, _pending = await asyncio.wait(
+        {listen_task, ready_task},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if listen_task in done:
+        with suppress(asyncio.CancelledError):
+            await listen_task
+        return
+    ready_task.cancel()
+    try:
+        preferred_player_id = (
+            app.output_manager.preferred_player_id
+            if app.output_manager
+            else None
+        )
+        player_id, _queue_id = await playback.resolve_player_and_queue(
+            client,
+            preferred_player_id,
+        )
+        queue = await client.player_queues.get_active_queue(player_id)
+        payload = _build_remote_playback_payload(queue)
+        GLib.idle_add(app._apply_remote_playback_state, payload, "")
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "Initial playback listener state fetch failed: %s",
+            exc,
+        )
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, stop_event.wait)
+    await client.disconnect()
+    listen_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await listen_task
+
+
+def ensure_remote_playback_sync(app) -> None:
     if not app.server_url:
         return
-    app.playback_sync_id = GLib.timeout_add(
-        interval_ms,
-        app._remote_playback_sync_tick,
+    app._start_playback_listener()
+
+
+def refresh_remote_playback_state(app) -> None:
+    if not app.server_url:
+        return
+    app.ensure_remote_playback_sync()
+    if getattr(app, "playback_sync_inflight", False):
+        return
+    app.playback_sync_inflight = True
+    thread = threading.Thread(
+        target=app._sync_remote_playback_worker,
+        daemon=True,
     )
+    thread.start()
 
 
 def stop_remote_playback_sync(app) -> None:
-    sync_id = app.playback_sync_id
-    if sync_id is None:
-        return
-    try:
-        GLib.source_remove(sync_id)
-    except Exception:
-        pass
+    app._stop_playback_listener()
     app.playback_sync_id = None
+    app.playback_sync_inflight = False
 
 
 def _remote_playback_sync_tick(app) -> bool:
@@ -823,6 +1097,7 @@ def mark_playback_started(app) -> None:
     app.playback_pending_since = None
     if app.playback_state == PlaybackState.PLAYING:
         app.playback_last_tick = time.monotonic()
+    app.update_now_playing()
 
 
 def _is_sendspin_output(app) -> bool:

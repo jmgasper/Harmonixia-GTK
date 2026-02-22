@@ -1,7 +1,7 @@
-from gi.repository import Gtk
+from gi.repository import GLib, Gtk
 
 from constants import HOME_ALBUM_ART_SIZE, HOME_GRID_COLUMNS
-from ui import ui_utils
+from ui import track_table, ui_utils
 from ui.widgets import album_card
 
 
@@ -22,6 +22,42 @@ def build_home_section(app) -> Gtk.Widget:
     app.home_recently_played_list = played_list
     app.home_recently_played_status = played_status
     home_box.append(played_section)
+
+    recent_tracks_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    recent_tracks_section.add_css_class("search-group")
+    recent_tracks_header = Gtk.Label(label="Recently Played Tracks")
+    recent_tracks_header.add_css_class("section-title")
+    recent_tracks_header.set_xalign(0)
+    recent_tracks_section.append(recent_tracks_header)
+    recent_tracks_table = track_table.build_tracks_table(
+        app,
+        store_attr="home_recent_tracks_store",
+        sort_model_attr="home_recent_tracks_sort_model",
+        selection_attr="home_recent_tracks_selection",
+        view_attr="home_recent_tracks_view",
+        use_track_art=True,
+        include_album_column=True,
+    )
+    recent_tracks_scroller = Gtk.ScrolledWindow()
+    recent_tracks_scroller.set_policy(
+        Gtk.PolicyType.AUTOMATIC,
+        Gtk.PolicyType.AUTOMATIC,
+    )
+    recent_tracks_scroller.set_child(recent_tracks_table)
+    if hasattr(recent_tracks_scroller, "set_propagate_natural_height"):
+        recent_tracks_scroller.set_propagate_natural_height(True)
+    recent_tracks_scroller.set_vexpand(False)
+    recent_tracks_section.append(recent_tracks_scroller)
+
+    recent_tracks_status = Gtk.Label(label="Play tracks to see them here.")
+    recent_tracks_status.add_css_class("status-label")
+    recent_tracks_status.set_xalign(0)
+    recent_tracks_status.set_wrap(True)
+    recent_tracks_status.set_visible(False)
+    recent_tracks_status.empty_message = "Play tracks to see them here."
+    recent_tracks_section.append(recent_tracks_status)
+    app.home_recent_tracks_status = recent_tracks_status
+    home_box.append(recent_tracks_section)
 
     added_section, added_list, added_status = build_home_album_list(
         "Recently Added Albums",
@@ -46,6 +82,17 @@ def build_home_section(app) -> Gtk.Widget:
     scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
     scroller.set_child(home_box)
     scroller.set_vexpand(True)
+
+    last_width = {"value": 0}
+
+    def on_home_tick(widget, _frame_clock) -> bool:
+        width = widget.get_allocated_width()
+        if width != last_width["value"]:
+            last_width["value"] = width
+            _apply_home_layout(app, width)
+        return GLib.SOURCE_CONTINUE
+
+    scroller.add_tick_callback(on_home_tick)
 
     app.refresh_home_sections()
     return scroller
@@ -102,8 +149,8 @@ def build_home_media_list(
         Gtk.SelectionMode.NONE,
         homogeneous=True,
         css_class="home-grid",
-        min_children_per_line=HOME_GRID_COLUMNS,
-        max_children_per_line=HOME_GRID_COLUMNS,
+        min_children_per_line=3,
+        max_children_per_line=5,
     )
     flow.home_art_size = HOME_ALBUM_ART_SIZE
     if on_activate:
@@ -126,6 +173,27 @@ def build_home_media_list(
     section.append(status)
 
     return section, flow, status
+
+
+def _apply_home_layout(app, width: int) -> None:
+    if width <= 0:
+        return
+    if width < 700:
+        columns = 3
+    elif width < 1000:
+        columns = 4
+    else:
+        columns = 5
+    flows = [
+        getattr(app, "home_recently_played_list", None),
+        getattr(app, "home_recently_added_list", None),
+    ]
+    flows.extend(getattr(app, "home_recommendation_flows", []) or [])
+    for flow in flows:
+        if flow is None:
+            continue
+        flow.set_min_children_per_line(columns)
+        flow.set_max_children_per_line(columns)
 
 
 def _trim_items_to_full_rows(items: list, columns: int) -> list:
@@ -257,6 +325,10 @@ def _make_recommendation_card(
             image_url,
             art_size=art_size,
         )
+    provider_domain = None
+    payload = item.get("payload")
+    if isinstance(payload, dict):
+        provider_domain = album_card.get_album_provider_domain(payload)
     show_artist = bool(subtitle)
     return album_card.make_album_card(
         app,
@@ -265,6 +337,8 @@ def _make_recommendation_card(
         image_url,
         art_size=art_size,
         show_artist=show_artist,
+        provider_domain=provider_domain,
+        album_data=payload if isinstance(payload, dict) else item,
     )
 
 
