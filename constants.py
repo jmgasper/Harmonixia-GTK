@@ -8,7 +8,7 @@ SENDSPIN_PORT = 8927
 SETTINGS_FILE = "settings.json"
 CSS_FILE = "style.css"
 FONT_DIR = "fonts"
-FONT_FILES = ("NotoSans-Variable.ttf",)
+FONT_FILES = ("Inter-Variable.ttf",)
 
 # UI dimensions
 MEDIA_TILE_SIZE = 150

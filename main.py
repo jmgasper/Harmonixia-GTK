@@ -99,7 +99,8 @@ class MusicApp(Gtk.Application):
             "artist_albums_header", "artist_albums_status_label", "artist_albums_flow",
             "artist_albums_previous_view", "albums_header", "album_type_filter_button",
             "artists_header", "library_status_label", "library_loading_overlay", "library_loading_spinner",
-            "library_loading_label", "settings_button", "sidebar_now_playing_art", "sidebar_now_playing_art_url",
+            "library_loading_label", "library_loading_progress_bar", "library_loading_sub_label",
+            "_loading_pulse_timer_id", "settings_button", "sidebar_now_playing_art", "sidebar_now_playing_art_url",
             "sidebar_queue_controls", "repeat_button", "repeat_button_stack", "repeat_button_icon",
             "repeat_button_spinner", "shuffle_button", "shuffle_button_stack", "shuffle_button_icon",
             "shuffle_button_spinner", "repeat_all_icon_name", "repeat_one_icon_name", "shuffle_icon_name",
@@ -109,7 +110,9 @@ class MusicApp(Gtk.Application):
             "gtk_debug_status_label", "library_list", "home_nav_list", "playlists_list",
             "playlists_status_label", "playlists_add_button", "home_recently_played_list", "home_recently_added_list",
             "home_recommendations_box", "home_recommendations_status", "home_recommendation_flows",
-            "home_recently_played_status", "home_recently_added_status", "home_recently_played_refresh_id", "album_detail_view",
+            "home_recently_played_status", "home_recently_added_status", "home_recently_played_refresh_id",
+            "home_recently_played_spinner", "home_recently_added_spinner", "home_recent_tracks_spinner",
+            "home_recommendations_spinner", "album_detail_view",
             "album_detail_background", "album_detail_art", "album_detail_title", "album_detail_artist", "album_detail_artist_image", "album_detail_artist_button",
             "album_detail_release_year", "album_detail_track_summary",
             "album_detail_status_label", "album_detail_play_button", "album_tracks_store", "album_tracks_sort_model",
@@ -489,7 +492,7 @@ class MusicApp(Gtk.Application):
     def build_main_area(self) -> Gtk.Widget:
         stack = Gtk.Stack()
         stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        stack.set_transition_duration(180)
+        stack.set_transition_duration(120)
         stack.set_hexpand(True)
         stack.set_vexpand(True)
 

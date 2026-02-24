@@ -123,19 +123,30 @@ def build_album_detail_section(app) -> Gtk.Widget:
     play_button.add_css_class("suggested-action")
     play_button.add_css_class("detail-play")
     play_button.set_halign(Gtk.Align.START)
-    play_button.set_tooltip_text("Play")
     play_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
     play_icon.set_pixel_size(18)
-    play_button.set_child(play_icon)
+    play_label = Gtk.Label(label="Play")
+    play_label.add_css_class("detail-action-label")
+    play_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    play_content.append(play_icon)
+    play_content.append(play_label)
+    play_button.set_child(play_content)
     play_button.connect("clicked", app.on_album_play_clicked)
 
     add_to_queue_button = Gtk.Button()
     add_to_queue_button.add_css_class("detail-queue")
     add_to_queue_button.set_halign(Gtk.Align.START)
-    add_to_queue_button.set_tooltip_text("Add to Queue")
     add_to_queue_icon = Gtk.Image.new_from_icon_name("list-add-symbolic")
     add_to_queue_icon.set_pixel_size(18)
-    add_to_queue_button.set_child(add_to_queue_icon)
+    add_to_queue_label = Gtk.Label(label="Add to Queue")
+    add_to_queue_label.add_css_class("detail-action-label")
+    add_to_queue_content = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=6,
+    )
+    add_to_queue_content.append(add_to_queue_icon)
+    add_to_queue_content.append(add_to_queue_label)
+    add_to_queue_button.set_child(add_to_queue_content)
     add_to_queue_button.connect(
         "clicked",
         app.on_album_add_to_queue_clicked,
@@ -144,10 +155,17 @@ def build_album_detail_section(app) -> Gtk.Widget:
     add_to_playlist_button = Gtk.Button()
     add_to_playlist_button.add_css_class("detail-playlist")
     add_to_playlist_button.set_halign(Gtk.Align.START)
-    add_to_playlist_button.set_tooltip_text("Add to Playlist")
     add_to_playlist_icon = Gtk.Image.new_from_icon_name("playlist-symbolic")
     add_to_playlist_icon.set_pixel_size(18)
-    add_to_playlist_button.set_child(add_to_playlist_icon)
+    add_to_playlist_label = Gtk.Label(label="Add to Playlist")
+    add_to_playlist_label.add_css_class("detail-action-label")
+    add_to_playlist_content = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=6,
+    )
+    add_to_playlist_content.append(add_to_playlist_icon)
+    add_to_playlist_content.append(add_to_playlist_label)
+    add_to_playlist_button.set_child(add_to_playlist_content)
     add_to_playlist_button.connect(
         "clicked",
         app.on_album_add_to_playlist_clicked,
@@ -156,7 +174,6 @@ def build_album_detail_section(app) -> Gtk.Widget:
     start_radio_button = Gtk.Button()
     start_radio_button.add_css_class("detail-radio")
     start_radio_button.set_halign(Gtk.Align.START)
-    start_radio_button.set_tooltip_text("Start Radio")
     start_radio_icon_name = app.pick_icon_name(
         ["radio-symbolic", "radio", "media-playlist-shuffle-symbolic"]
     )
@@ -164,7 +181,15 @@ def build_album_detail_section(app) -> Gtk.Widget:
         start_radio_icon_name
     )
     start_radio_icon.set_pixel_size(18)
-    start_radio_button.set_child(start_radio_icon)
+    start_radio_label = Gtk.Label(label="Start Radio")
+    start_radio_label.add_css_class("detail-action-label")
+    start_radio_content = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=6,
+    )
+    start_radio_content.append(start_radio_icon)
+    start_radio_content.append(start_radio_label)
+    start_radio_button.set_child(start_radio_content)
     start_radio_button.connect(
         "clicked",
         app.on_album_start_radio_clicked,
@@ -199,6 +224,13 @@ def build_album_detail_section(app) -> Gtk.Widget:
     status.set_visible(False)
     detail_box.append(status)
 
+    spinner = Gtk.Spinner()
+    spinner.add_css_class("detail-loading-spinner")
+    spinner.set_size_request(24, 24)
+    spinner.set_halign(Gtk.Align.START)
+    spinner.set_visible(False)
+    detail_box.append(spinner)
+
     tracks_table = track_table.build_tracks_table(
         app,
         include_album_column=False,
@@ -225,6 +257,7 @@ def build_album_detail_section(app) -> Gtk.Widget:
     app.album_detail_release_year = release_year_label
     app.album_detail_track_summary = track_summary_label
     app.album_detail_status_label = status
+    app.album_detail_spinner = spinner
     app.album_detail_play_button = play_button
     app.album_detail_add_to_queue_button = add_to_queue_button
     app.album_detail_add_to_playlist_button = add_to_playlist_button

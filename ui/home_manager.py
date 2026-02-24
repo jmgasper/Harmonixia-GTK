@@ -24,6 +24,18 @@ def clear_home_recent_lists(app) -> None:
     app.home_recently_played_tracks_loading = False
     app.home_recently_added_loading = False
     app.home_recommendations_loading = False
+    if getattr(app, "home_recently_played_spinner", None):
+        app.home_recently_played_spinner.stop()
+        app.home_recently_played_spinner.set_visible(False)
+    if getattr(app, "home_recent_tracks_spinner", None):
+        app.home_recent_tracks_spinner.stop()
+        app.home_recent_tracks_spinner.set_visible(False)
+    if getattr(app, "home_recently_added_spinner", None):
+        app.home_recently_added_spinner.stop()
+        app.home_recently_added_spinner.set_visible(False)
+    if getattr(app, "home_recommendations_spinner", None):
+        app.home_recommendations_spinner.stop()
+        app.home_recommendations_spinner.set_visible(False)
     if app.home_recently_played_refresh_id is not None:
         GLib.source_remove(app.home_recently_played_refresh_id)
         app.home_recently_played_refresh_id = None
@@ -64,6 +76,9 @@ def refresh_home_recently_played(app) -> None:
     if app.home_recently_played_loading:
         return
     app.home_recently_played_loading = True
+    if getattr(app, "home_recently_played_spinner", None):
+        app.home_recently_played_spinner.start()
+        app.home_recently_played_spinner.set_visible(True)
     home_section.set_home_status(
         app.home_recently_played_status, "Loading recently played..."
     )
@@ -87,6 +102,9 @@ def refresh_home_recently_played_tracks(app) -> None:
     if getattr(app, "home_recently_played_tracks_loading", False):
         return
     app.home_recently_played_tracks_loading = True
+    if getattr(app, "home_recent_tracks_spinner", None):
+        app.home_recent_tracks_spinner.start()
+        app.home_recent_tracks_spinner.set_visible(True)
     home_section.set_home_status(
         app.home_recent_tracks_status,
         "Loading recently played tracks...",
@@ -111,6 +129,9 @@ def refresh_home_recently_added(app) -> None:
     if app.home_recently_added_loading:
         return
     app.home_recently_added_loading = True
+    if getattr(app, "home_recently_added_spinner", None):
+        app.home_recently_added_spinner.start()
+        app.home_recently_added_spinner.set_visible(True)
     home_section.set_home_status(
         app.home_recently_added_status,
         "Loading recently added albums...",
@@ -135,6 +156,9 @@ def refresh_home_recommendations(app) -> None:
     if app.home_recommendations_loading:
         return
     app.home_recommendations_loading = True
+    if getattr(app, "home_recommendations_spinner", None):
+        app.home_recommendations_spinner.start()
+        app.home_recommendations_spinner.set_visible(True)
     home_section.set_home_status(
         app.home_recommendations_status,
         "Loading recommendations...",
@@ -204,6 +228,9 @@ def _load_recommendations_worker(app) -> None:
 
 def on_recently_played_loaded(app, albums: list[dict], error: str) -> None:
     app.home_recently_played_loading = False
+    if getattr(app, "home_recently_played_spinner", None):
+        app.home_recently_played_spinner.stop()
+        app.home_recently_played_spinner.set_visible(False)
     if error:
         home_section.populate_home_album_list(
             app, app.home_recently_played_list, []
@@ -225,6 +252,9 @@ def on_recently_played_tracks_loaded(
     error: str,
 ) -> None:
     app.home_recently_played_tracks_loading = False
+    if getattr(app, "home_recent_tracks_spinner", None):
+        app.home_recent_tracks_spinner.stop()
+        app.home_recent_tracks_spinner.set_visible(False)
     if error:
         _populate_home_recent_tracks(app, [])
         home_section.set_home_status(
@@ -238,6 +268,9 @@ def on_recently_played_tracks_loaded(
 
 def on_recently_added_loaded(app, albums: list[dict], error: str) -> None:
     app.home_recently_added_loading = False
+    if getattr(app, "home_recently_added_spinner", None):
+        app.home_recently_added_spinner.stop()
+        app.home_recently_added_spinner.set_visible(False)
     if error:
         home_section.populate_home_album_list(
             app, app.home_recently_added_list, []
@@ -257,6 +290,9 @@ def on_recommendations_loaded(
     app, sections: list[dict], error: str
 ) -> None:
     app.home_recommendations_loading = False
+    if getattr(app, "home_recommendations_spinner", None):
+        app.home_recommendations_spinner.stop()
+        app.home_recommendations_spinner.set_visible(False)
     if error:
         home_section.populate_home_recommendations(app, [])
         home_section.set_home_status(

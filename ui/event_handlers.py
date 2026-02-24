@@ -9,7 +9,7 @@ from gi.repository import Gdk, GLib, Gtk
 
 from music_assistant import playback
 from music_assistant_models.enums import PlaybackState
-from ui import image_loader
+from ui import image_loader, track_utils
 
 
 def on_track_action_clicked(app, button: Gtk.Button, menu_button, action: str) -> None:
@@ -178,12 +178,28 @@ def on_play_pause_clicked(app, _button) -> None:
         app.send_playback_command("play")
 
 
+def _reenable_button(button) -> bool:
+    if button is not None:
+        button.set_sensitive(True)
+    return False
+
+
 def on_previous_clicked(app, _button) -> None:
+    button = getattr(app, "previous_button", None)
+    if button is not None:
+        button.set_sensitive(False)
     app.send_playback_command("previous")
+    if button is not None:
+        GLib.timeout_add(300, _reenable_button, button)
 
 
 def on_next_clicked(app, _button) -> None:
+    button = getattr(app, "next_button", None)
+    if button is not None:
+        button.set_sensitive(False)
     app.send_playback_command("next")
+    if button is not None:
+        GLib.timeout_add(300, _reenable_button, button)
 
 
 def on_repeat_clicked(app, _button) -> None:
@@ -228,14 +244,19 @@ def on_volume_drag_end(
 
 
 def on_seek_scale_changed(app, scale: Gtk.Scale) -> None:
-    if not getattr(app, "seek_dragging", False):
-        return
     if app.playback_track_info is None:
         return
     duration = app.playback_duration or 0
     if duration <= 0:
         return
     value = max(0.0, min(1.0, float(scale.get_value())))
+    if not getattr(app, "seek_dragging", False):
+        elapsed = max(0.0, min(float(duration), value * float(duration)))
+        if app.playback_time_current_label:
+            app.playback_time_current_label.set_label(
+                track_utils.format_timecode(elapsed)
+            )
+        return
     position = max(0.0, min(float(duration), value * float(duration)))
     app.playback_elapsed = position
     app.playback_last_tick = time.monotonic()
@@ -587,6 +608,14 @@ def _album_card_action_worker(
 
 def _refresh_remote_playback_state(app) -> None:
     GLib.idle_add(app.refresh_remote_playback_state)
+    GLib.timeout_add(200, _deferred_remote_playback_refresh, app)
+    GLib.timeout_add(800, _deferred_remote_playback_refresh, app)
+    GLib.timeout_add(2000, _deferred_remote_playback_refresh, app)
+
+
+def _deferred_remote_playback_refresh(app) -> bool:
+    app.refresh_remote_playback_state()
+    return False
 
 
 def _run_playlist_context_action(

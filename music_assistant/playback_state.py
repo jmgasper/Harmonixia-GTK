@@ -235,7 +235,7 @@ def update_play_pause_icon(app) -> None:
 
 def ensure_playback_timer(app) -> None:
     if app.playback_timer_id is None:
-        app.playback_timer_id = GLib.timeout_add(500, app.on_playback_tick)
+        app.playback_timer_id = GLib.timeout_add(250, app.on_playback_tick)
 
 
 def on_playback_tick(app) -> bool:
@@ -247,8 +247,11 @@ def on_playback_tick(app) -> bool:
         if app.playback_last_tick is None:
             app.playback_last_tick = now
         if getattr(app, "playback_pending", False):
-            app.playback_last_tick = now
-        else:
+            if _is_playback_pending_grace(app):
+                app.playback_last_tick = now
+            else:
+                mark_playback_started(app)
+        if not getattr(app, "playback_pending", False):
             delta = now - app.playback_last_tick
             app.playback_elapsed += delta
             app.playback_last_tick = now
@@ -677,27 +680,187 @@ def update_playback_progress_ui(app) -> None:
         app.playback_seek_scale.set_value(fraction)
 
 
-def _build_remote_playback_payload(queue: object | None) -> dict:
-    if not queue:
-        return {
-            "state": None,
-            "elapsed": None,
-            "current_item": None,
-            "current_index": None,
-            "repeat_mode": None,
-            "shuffle_enabled": None,
-        }
-    shuffle_enabled = getattr(queue, "shuffle_enabled", None)
-    if shuffle_enabled is None:
-        shuffle_enabled = getattr(queue, "shuffle", None)
+def _empty_remote_playback_payload(
+    player_id: str | None = None,
+    queue_id: str | None = None,
+) -> dict:
     return {
-        "state": getattr(queue, "state", None),
-        "elapsed": getattr(queue, "elapsed_time", None),
-        "current_item": getattr(queue, "current_item", None),
-        "current_index": getattr(queue, "current_index", None),
-        "repeat_mode": getattr(queue, "repeat_mode", None),
-        "shuffle_enabled": shuffle_enabled,
+        "state": None,
+        "elapsed": None,
+        "current_item": None,
+        "current_index": None,
+        "repeat_mode": None,
+        "shuffle_enabled": None,
+        "player_id": player_id,
+        "queue_id": queue_id,
     }
+
+
+def _extract_queue_id(queue: object | None) -> str | None:
+    if queue is None:
+        return None
+    queue_id = _get_attr(queue, "queue_id") or _get_attr(queue, "id")
+    if isinstance(queue_id, str):
+        queue_id = queue_id.strip() or None
+    elif queue_id is not None:
+        queue_id = str(queue_id).strip() or None
+    return queue_id
+
+
+def _extract_queue_state(queue: object | None) -> object | None:
+    if queue is None:
+        return None
+    return (
+        _get_attr(queue, "state")
+        or _get_attr(queue, "playback_state")
+        or _get_attr(queue, "player_state")
+    )
+
+
+def _extract_queue_elapsed(queue: object | None) -> object | None:
+    if queue is None:
+        return None
+    for key in (
+        "elapsed_time",
+        "elapsed",
+        "elapsed_seconds",
+        "position",
+        "position_seconds",
+    ):
+        value = _get_attr(queue, key)
+        if value is not None:
+            return value
+    return None
+
+
+def _extract_queue_current_item(queue: object | None) -> object | None:
+    if queue is None:
+        return None
+    for key in (
+        "current_item",
+        "current_media_item",
+        "media_item",
+        "item",
+        "track",
+        "current_track",
+    ):
+        value = _get_attr(queue, key)
+        if value is not None:
+            return value
+    return None
+
+
+def _extract_queue_current_index(queue: object | None) -> object | None:
+    if queue is None:
+        return None
+    for key in ("current_index", "queue_index", "index"):
+        value = _get_attr(queue, key)
+        if value is not None:
+            return value
+    return None
+
+
+def _extract_queue_repeat_mode(queue: object | None) -> object | None:
+    if queue is None:
+        return None
+    return _get_attr(queue, "repeat_mode") or _get_attr(queue, "repeat")
+
+
+def _extract_queue_shuffle_enabled(queue: object | None) -> object | None:
+    if queue is None:
+        return None
+    shuffle_enabled = _get_attr(queue, "shuffle_enabled")
+    if shuffle_enabled is None:
+        shuffle_enabled = _get_attr(queue, "shuffle")
+    return shuffle_enabled
+
+
+def _build_remote_playback_payload(
+    queue: object | None,
+    player_id: str | None = None,
+) -> dict:
+    if not queue:
+        return _empty_remote_playback_payload(player_id, None)
+    payload_player_id = player_id or _get_attr(queue, "player_id")
+    if isinstance(payload_player_id, str):
+        payload_player_id = payload_player_id.strip() or None
+    elif payload_player_id is not None:
+        payload_player_id = str(payload_player_id).strip() or None
+    queue_id = _extract_queue_id(queue)
+    return {
+        "state": _extract_queue_state(queue),
+        "elapsed": _extract_queue_elapsed(queue),
+        "current_item": _extract_queue_current_item(queue),
+        "current_index": _extract_queue_current_index(queue),
+        "repeat_mode": _extract_queue_repeat_mode(queue),
+        "shuffle_enabled": _extract_queue_shuffle_enabled(queue),
+        "player_id": payload_player_id,
+        "queue_id": queue_id,
+    }
+
+
+def _queue_has_current_item(queue: object | None) -> bool:
+    if queue is None:
+        return False
+    return _extract_queue_current_item(queue) is not None
+
+
+def _queue_is_active_state(queue: object | None) -> bool:
+    if queue is None:
+        return False
+    state = _normalize_queue_state(_extract_queue_state(queue))
+    return state in ("playing", "paused")
+
+
+async def _resolve_remote_sync_queue(
+    client: MusicAssistantClient,
+    preferred_player_id: str | None,
+) -> tuple[str | None, object | None]:
+    queue = None
+    selected_player_id = None
+    if preferred_player_id:
+        selected_player_id = preferred_player_id
+        try:
+            queue = await client.player_queues.get_active_queue(preferred_player_id)
+        except Exception:
+            queue = None
+        if _queue_has_current_item(queue) or _queue_is_active_state(queue):
+            return selected_player_id, queue
+    try:
+        await client.players.fetch_state()
+    except Exception:
+        pass
+    best_player_id = selected_player_id
+    best_queue = queue
+    fallback_player_id = selected_player_id
+    fallback_queue = queue
+    for player in getattr(client.players, "players", []) or []:
+        player_id = getattr(player, "player_id", None)
+        if not player_id:
+            continue
+        if not getattr(player, "enabled", True) or not getattr(player, "available", True):
+            continue
+        if selected_player_id and player_id == selected_player_id:
+            continue
+        try:
+            candidate_queue = await client.player_queues.get_active_queue(player_id)
+        except Exception:
+            continue
+        if candidate_queue is None:
+            continue
+        if fallback_queue is None:
+            fallback_player_id = player_id
+            fallback_queue = candidate_queue
+        if _queue_has_current_item(candidate_queue):
+            best_player_id = player_id
+            best_queue = candidate_queue
+            break
+        if best_queue is None and _queue_is_active_state(candidate_queue):
+            best_player_id = player_id
+            best_queue = candidate_queue
+    if best_queue is not None:
+        return best_player_id, best_queue
+    return fallback_player_id, fallback_queue
 
 
 def _start_playback_listener(app) -> None:
@@ -817,10 +980,32 @@ async def _playback_listener_async(
                 else None
             )
             if event_type == EventType.QUEUE_UPDATED:
-                queue_id = getattr(data, "queue_id", None)
+                queue_id = _extract_queue_id(data)
                 if preferred_player_id and queue_id != preferred_player_id:
-                    return
-                payload = _build_remote_playback_payload(data)
+                    active_queue_id = None
+                    try:
+                        active_queue = await client.player_queues.get_active_queue(
+                            preferred_player_id
+                        )
+                        active_queue_id = _extract_queue_id(active_queue)
+                    except Exception as exc:
+                        logging.getLogger(__name__).debug(
+                            "Active queue lookup failed for %s: %s",
+                            preferred_player_id,
+                            exc,
+                        )
+                    event_has_track = _extract_queue_current_item(data) is not None
+                    event_state = _normalize_queue_state(_extract_queue_state(data))
+                    if (
+                        active_queue_id
+                        and queue_id != active_queue_id
+                        and not (
+                            event_has_track
+                            and event_state in ("playing", "paused")
+                        )
+                    ):
+                        return
+                payload = _build_remote_playback_payload(data, None)
                 GLib.idle_add(app._apply_remote_playback_state, payload, "")
                 return
             if event_type != EventType.PLAYER_UPDATED:
@@ -831,7 +1016,7 @@ async def _playback_listener_async(
             if not player_id:
                 return
             queue = await client.player_queues.get_active_queue(player_id)
-            payload = _build_remote_playback_payload(queue)
+            payload = _build_remote_playback_payload(queue, player_id)
             GLib.idle_add(app._apply_remote_playback_state, payload, "")
         except Exception as exc:
             logging.getLogger(__name__).debug(
@@ -872,12 +1057,11 @@ async def _playback_listener_async(
             if app.output_manager
             else None
         )
-        player_id, _queue_id = await playback.resolve_player_and_queue(
+        player_id, queue = await _resolve_remote_sync_queue(
             client,
             preferred_player_id,
         )
-        queue = await client.player_queues.get_active_queue(player_id)
-        payload = _build_remote_playback_payload(queue)
+        payload = _build_remote_playback_payload(queue, player_id)
         GLib.idle_add(app._apply_remote_playback_state, payload, "")
     except Exception as exc:
         logging.getLogger(__name__).debug(
@@ -958,31 +1142,11 @@ def _sync_remote_playback_worker(app) -> None:
 async def _fetch_remote_playback_state_async(
     app, client, preferred_player_id
 ) -> dict:
-    player_id, _queue_id = await playback.resolve_player_and_queue(
+    player_id, queue = await _resolve_remote_sync_queue(
         client,
         preferred_player_id,
     )
-    queue = await client.player_queues.get_active_queue(player_id)
-    if not queue:
-        return {
-            "state": None,
-            "elapsed": None,
-            "current_item": None,
-            "current_index": None,
-            "repeat_mode": None,
-            "shuffle_enabled": None,
-        }
-    shuffle_enabled = getattr(queue, "shuffle_enabled", None)
-    if shuffle_enabled is None:
-        shuffle_enabled = getattr(queue, "shuffle", None)
-    return {
-        "state": getattr(queue, "state", None),
-        "elapsed": getattr(queue, "elapsed_time", None),
-        "current_item": getattr(queue, "current_item", None),
-        "current_index": getattr(queue, "current_index", None),
-        "repeat_mode": getattr(queue, "repeat_mode", None),
-        "shuffle_enabled": shuffle_enabled,
-    }
+    return _build_remote_playback_payload(queue, player_id)
 
 
 def _apply_remote_playback_state(
@@ -1000,13 +1164,36 @@ def _apply_remote_playback_state(
 
     current_item = payload.get("current_item")
     queue_state = _normalize_queue_state(payload.get("state"))
+    payload_player_id = payload.get("player_id")
+    if isinstance(payload_player_id, str):
+        payload_player_id = payload_player_id.strip() or None
+    else:
+        payload_player_id = None
+    payload_queue_id = payload.get("queue_id")
+    if isinstance(payload_queue_id, str):
+        payload_queue_id = payload_queue_id.strip() or None
+    else:
+        payload_queue_id = None
     elapsed = payload.get("elapsed")
     current_index = payload.get("current_index")
     repeat_mode = payload.get("repeat_mode")
     shuffle_enabled = payload.get("shuffle_enabled")
+    elapsed_value = _coerce_elapsed(elapsed)
     hold_elapsed = _should_hold_elapsed(app)
 
+    if payload_queue_id:
+        app.playback_queue_identity = payload_queue_id
+    if payload_player_id and getattr(app, "output_manager", None):
+        current_preferred = app.output_manager.preferred_player_id
+        if (
+            current_preferred != payload_player_id
+            and (current_item is not None or queue_state in ("playing", "paused"))
+        ):
+            app.output_manager.preferred_player_id = payload_player_id
+
     if current_item is None:
+        if queue_state in ("playing", "paused"):
+            return False
         if _is_playback_pending_grace(app):
             return False
         if app.playback_track_info:
@@ -1017,17 +1204,36 @@ def _apply_remote_playback_state(
     if not track_info:
         return False
 
+    previous_track_info = (
+        app.playback_track_info if isinstance(app.playback_track_info, dict) else {}
+    )
     new_index = _resolve_remote_track_index(
         app,
         track_info,
         current_index,
     )
     new_identity = track_info.get("identity")
+    previous_queue_item_id = previous_track_info.get("queue_item_id")
+    current_queue_item_id = track_info.get("queue_item_id")
+    queue_item_changed = (
+        previous_queue_item_id is not None
+        and current_queue_item_id is not None
+        and current_queue_item_id != previous_queue_item_id
+    )
+    display_changed = (
+        _track_display_signature(track_info)
+        != _track_display_signature(previous_track_info)
+    )
     track_changed = (
         app.playback_track_info is None
         or new_identity != app.playback_track_identity
+        or queue_item_changed
         or (new_index is not None and new_index != app.playback_track_index)
     )
+    if not queue_state and track_changed:
+        # Some queue payload variants omit explicit state on track changes.
+        # Treat a track switch as an active playback transition.
+        queue_state = "playing"
 
     if track_changed:
         app.playback_track_info = track_info
@@ -1037,7 +1243,7 @@ def _apply_remote_playback_state(
         if hold_elapsed:
             app.playback_elapsed = 0.0
         else:
-            app.playback_elapsed = _coerce_elapsed(elapsed) or 0.0
+            app.playback_elapsed = elapsed_value or 0.0
         app.playback_last_tick = time.monotonic()
         app.playback_remote_active = bool(
             track_info.get("source_uri") and app.server_url
@@ -1048,9 +1254,17 @@ def _apply_remote_playback_state(
         app.update_playback_progress_ui()
         app.sync_playback_highlight()
     else:
-        updated_elapsed = _coerce_elapsed(elapsed)
-        if updated_elapsed is not None and not hold_elapsed:
-            app.playback_elapsed = updated_elapsed
+        if display_changed:
+            app.playback_track_info = track_info
+            duration_value = track_info.get("length_seconds", 0) or 0
+            if duration_value > 0:
+                app.playback_duration = duration_value
+            app.update_now_playing()
+            if app.mpris_manager:
+                app.mpris_manager.notify_track_changed()
+            app.update_playback_progress_ui()
+        if elapsed_value is not None and not hold_elapsed:
+            app.playback_elapsed = elapsed_value
             if app.playback_state == PlaybackState.PLAYING:
                 app.playback_last_tick = time.monotonic()
             app.update_playback_progress_ui()
@@ -1059,12 +1273,14 @@ def _apply_remote_playback_state(
         app.set_playback_state(PlaybackState.PLAYING)
     elif queue_state == "paused":
         app.set_playback_state(PlaybackState.PAUSED)
-    if (
-        queue_state == "playing"
-        and getattr(app, "playback_pending", False)
-        and not _is_sendspin_output(app)
-    ):
-        mark_playback_started(app)
+    if queue_state == "playing" and getattr(app, "playback_pending", False):
+        can_mark_started = (
+            not _is_sendspin_output(app)
+            or not _is_playback_pending_grace(app)
+            or bool(elapsed_value and elapsed_value > 0.0)
+        )
+        if can_mark_started:
+            mark_playback_started(app)
 
     _apply_queue_mode_updates(app, repeat_mode, shuffle_enabled)
     app.ensure_playback_timer()
@@ -1088,6 +1304,21 @@ def _normalize_queue_state(state: object) -> str:
     if text.startswith("playbackstate."):
         return text.split(".", 1)[1]
     return text
+
+
+def _track_display_signature(track_info: dict) -> tuple:
+    if not track_info:
+        return ()
+    album = _normalize_album_label(track_info.get("album"))
+    return (
+        track_info.get("queue_item_id"),
+        track_info.get("source_uri"),
+        track_info.get("title"),
+        track_info.get("artist"),
+        album,
+        track_info.get("length_seconds"),
+        track_info.get("image_url"),
+    )
 
 
 def mark_playback_started(app) -> None:
@@ -1225,15 +1456,28 @@ def _build_track_info_from_queue_item(
     media_item = _extract_queue_media_item(queue_item)
     if media_item is None:
         return None
-    title = _get_attr(media_item, "name") or _get_attr(
-        media_item, "title"
+    queue_item_id = (
+        _get_attr(queue_item, "queue_item_id")
+        or _get_attr(queue_item, "item_id")
+        or _get_attr(queue_item, "id")
+    )
+    if queue_item_id is not None and not isinstance(queue_item_id, str):
+        queue_item_id = str(queue_item_id)
+    title = (
+        _get_attr(queue_item, "name")
+        or _get_attr(queue_item, "title")
+        or _get_attr(media_item, "name")
+        or _get_attr(media_item, "title")
     )
     if not title:
         title = "Unknown Track"
     elif not isinstance(title, str):
         title = str(title)
-    artist = _get_attr(media_item, "artist_str") or _get_attr(
-        media_item, "artist"
+    artist = (
+        _get_attr(queue_item, "artist_str")
+        or _get_attr(queue_item, "artist")
+        or _get_attr(media_item, "artist_str")
+        or _get_attr(media_item, "artist")
     )
     if isinstance(artist, (list, tuple)):
         artist = ui_utils.format_artist_names(list(artist))
@@ -1253,13 +1497,27 @@ def _build_track_info_from_queue_item(
         )
     elif not isinstance(artist, str):
         artist = str(artist)
-    album = _extract_album_name(media_item)
+    album = _extract_album_name(media_item) or _extract_album_name(queue_item)
     duration = (
         _get_attr(media_item, "duration")
         or _get_attr(media_item, "length_seconds")
         or _get_attr(media_item, "length")
+        or _get_attr(queue_item, "duration")
+        or _get_attr(queue_item, "length_seconds")
+        or _get_attr(queue_item, "length")
         or 0
     )
+    if not duration:
+        stream_details = _get_attr(queue_item, "streamdetails") or _get_attr(
+            queue_item, "stream_details"
+        )
+        if stream_details:
+            duration = (
+                _get_attr(stream_details, "duration")
+                or _get_attr(stream_details, "length_seconds")
+                or _get_attr(stream_details, "length")
+                or 0
+            )
     try:
         duration_value = int(duration)
     except (TypeError, ValueError):
@@ -1297,6 +1555,7 @@ def _build_track_info_from_queue_item(
         else ("fallback", track_number, title, artist)
     )
     return {
+        "queue_item_id": queue_item_id,
         "track_number": track_number,
         "title": title,
         "artist": artist,
@@ -1480,6 +1739,7 @@ def _playback_command_worker(app, command: str, position: int | None) -> None:
             app.output_manager.preferred_player_id,
             position,
         )
+        GLib.idle_add(_post_playback_command_ui_sync, app, command)
     except Exception as exc:
         error = str(exc)
     if error:
@@ -1488,6 +1748,32 @@ def _playback_command_worker(app, command: str, position: int | None) -> None:
             command,
             error,
         )
+
+
+def _post_playback_command_ui_sync(app, command: str) -> bool:
+    normalized = str(command).casefold()
+    if normalized in ("next", "previous"):
+        # Avoid stale seek position while remote queue processes the skip.
+        app.playback_elapsed = 0.0
+        app.playback_last_tick = time.monotonic()
+        app.update_playback_progress_ui()
+    if normalized in (
+        "next",
+        "previous",
+        "play",
+        "pause",
+        "resume",
+        "stop",
+        "seek",
+    ):
+        app.refresh_remote_playback_state()
+        GLib.timeout_add(700, _deferred_remote_refresh, app)
+    return False
+
+
+def _deferred_remote_refresh(app) -> bool:
+    app.refresh_remote_playback_state()
+    return False
 
 
 def send_playback_index(app, index: int) -> None:

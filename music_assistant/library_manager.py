@@ -85,6 +85,7 @@ def _load_library_worker(app) -> None:
             favorite_filter,
             album_order,
         )
+        GLib.idle_add(app.set_loading_message, "Processing library…")
     except AuthenticationRequired:
         error = "Authentication required. Add an access token in Settings."
     except AuthenticationFailed:
@@ -157,6 +158,15 @@ def _handle_library_change_refresh(app) -> bool:
     return False
 
 
+def _pulse_loading_bar(app) -> bool:
+    progress_bar = getattr(app, "library_loading_progress_bar", None)
+    if not app.library_loading or progress_bar is None:
+        app._loading_pulse_timer_id = None
+        return GLib.SOURCE_REMOVE
+    progress_bar.pulse()
+    return GLib.SOURCE_CONTINUE
+
+
 def set_loading_state(app, loading: bool, message: str = "") -> None:
     if loading:
         if app.library_loading_overlay:
@@ -165,13 +175,33 @@ def set_loading_state(app, loading: bool, message: str = "") -> None:
             app.library_loading_spinner.start()
         if app.library_loading_label:
             app.library_loading_label.set_label("Loading library...")
+        progress_bar = getattr(app, "library_loading_progress_bar", None)
+        if progress_bar:
+            progress_bar.set_visible(True)
+        sub_label = getattr(app, "library_loading_sub_label", None)
+        if sub_label:
+            sub_label.set_visible(True)
+        if getattr(app, "_loading_pulse_timer_id", None) is None:
+            app._loading_pulse_timer_id = GLib.timeout_add(
+                80, _pulse_loading_bar, app
+            )
         if message:
             app.set_status(message, is_error=False)
     else:
+        pulse_timer_id = getattr(app, "_loading_pulse_timer_id", None)
+        if pulse_timer_id is not None:
+            GLib.source_remove(pulse_timer_id)
+            app._loading_pulse_timer_id = None
         if app.library_loading_spinner:
             app.library_loading_spinner.stop()
         if app.library_loading_overlay:
             app.library_loading_overlay.set_visible(False)
+        progress_bar = getattr(app, "library_loading_progress_bar", None)
+        if progress_bar:
+            progress_bar.set_visible(False)
+        sub_label = getattr(app, "library_loading_sub_label", None)
+        if sub_label:
+            sub_label.set_visible(False)
 
     if app.settings_connect_button:
         app.settings_connect_button.set_sensitive(not loading)
@@ -186,6 +216,10 @@ def set_loading_message(app, message: str) -> None:
         app.set_status(message, is_error=False)
         if app.library_loading_label:
             app.library_loading_label.set_label(message)
+        sub_label = getattr(app, "library_loading_sub_label", None)
+        if sub_label:
+            sub_label.set_label(message)
+            sub_label.set_visible(bool(message))
 
 
 def set_status(app, message: str, is_error: bool = False) -> None:

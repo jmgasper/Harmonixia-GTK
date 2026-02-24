@@ -1,7 +1,9 @@
 from gi.repository import Gtk
 
 
-def create_loading_overlay() -> tuple[Gtk.Widget, Gtk.Spinner, Gtk.Label]:
+def create_loading_overlay() -> tuple[
+    Gtk.Widget, Gtk.Spinner, Gtk.Label, Gtk.ProgressBar, Gtk.Label
+]:
     loading_overlay = Gtk.CenterBox()
     loading_overlay.add_css_class("library-loading-overlay")
     loading_overlay.set_hexpand(True)
@@ -31,6 +33,19 @@ def create_loading_overlay() -> tuple[Gtk.Widget, Gtk.Spinner, Gtk.Label]:
 
     indicator.append(spinner_shell)
     indicator.append(loading_label)
+
+    progress_bar = Gtk.ProgressBar()
+    progress_bar.add_css_class("library-loading-progress")
+    progress_bar.set_pulse_step(0.12)
+    progress_bar.set_visible(False)
+    indicator.append(progress_bar)
+
+    sub_label = Gtk.Label()
+    sub_label.add_css_class("library-loading-sub-label")
+    sub_label.set_xalign(0.5)
+    sub_label.set_visible(False)
+    indicator.append(sub_label)
+
     loading_overlay.set_center_widget(indicator)
 
-    return loading_overlay, spinner, loading_label
+    return loading_overlay, spinner, loading_label, progress_bar, sub_label

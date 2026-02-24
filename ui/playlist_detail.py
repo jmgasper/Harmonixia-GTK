@@ -159,6 +159,13 @@ def build_playlist_detail_section(app) -> Gtk.Widget:
     status.set_visible(False)
     container.append(status)
 
+    spinner = Gtk.Spinner()
+    spinner.add_css_class("detail-loading-spinner")
+    spinner.set_size_request(24, 24)
+    spinner.set_halign(Gtk.Align.START)
+    spinner.set_visible(False)
+    container.append(spinner)
+
     tracks_table = track_table.build_tracks_table(
         app,
         store_attr="playlist_tracks_store",
@@ -185,6 +192,7 @@ def build_playlist_detail_section(app) -> Gtk.Widget:
     app.playlist_detail_art = art
     app.playlist_detail_title = title
     app.playlist_detail_status_label = status
+    app.playlist_detail_spinner = spinner
     app.playlist_detail_play_button = play_button
     app.playlist_detail_shuffle_button = shuffle_button
     app.playlist_detail_read_only_badge = read_only_badge

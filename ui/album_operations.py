@@ -373,6 +373,22 @@ def set_album_detail_status(app, message: str) -> None:
     app.album_detail_status_label.set_visible(bool(message))
 
 
+def _show_album_spinner(app) -> None:
+    spinner = getattr(app, "album_detail_spinner", None)
+    if not spinner:
+        return
+    spinner.set_visible(True)
+    spinner.start()
+
+
+def _hide_album_spinner(app) -> None:
+    spinner = getattr(app, "album_detail_spinner", None)
+    if not spinner:
+        return
+    spinner.stop()
+    spinner.set_visible(False)
+
+
 def get_albums_scroll_position(app) -> float:
     if not app.albums_scroller:
         return 0.0
@@ -416,6 +432,7 @@ def load_album_tracks(app, album: object) -> None:
         return
 
     set_album_detail_status(app, "Loading tracks...")
+    _show_album_spinner(app)
     thread = threading.Thread(
         target=app._load_album_tracks_worker,
         args=(album, candidates),
@@ -497,6 +514,7 @@ async def _fetch_album_tracks_async(
 def on_album_tracks_loaded(
     app, album: object, tracks: list[dict], error: str
 ) -> None:
+    _hide_album_spinner(app)
     if not is_same_album(app, album, app.current_album):
         return
     logging.getLogger(__name__).debug(
@@ -675,7 +693,7 @@ def _album_queue_action_worker(app, album: object, action_fn, action_label: str)
             else None,
         )
         if action_fn is playback.play_radio:
-            GLib.idle_add(app.refresh_remote_playback_state)
+            _schedule_radio_remote_refresh(app)
     except Exception as exc:
         error = str(exc)
     if error:
@@ -693,6 +711,18 @@ def _album_queue_action_worker(app, album: object, action_fn, action_label: str)
         )
         return
     GLib.idle_add(toast.show_toast, app, f"{action_label} complete.")
+
+
+def _schedule_radio_remote_refresh(app) -> None:
+    GLib.idle_add(app.refresh_remote_playback_state)
+    GLib.timeout_add(200, _deferred_radio_remote_refresh, app)
+    GLib.timeout_add(800, _deferred_radio_remote_refresh, app)
+    GLib.timeout_add(2000, _deferred_radio_remote_refresh, app)
+
+
+def _deferred_radio_remote_refresh(app) -> bool:
+    app.refresh_remote_playback_state()
+    return False
 
 
 def _set_album_action_status_if_current(

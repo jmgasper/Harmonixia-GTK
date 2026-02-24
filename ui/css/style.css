@@ -1,11 +1,9 @@
 window {
   background-color: #111318;
   color: #e6e9ef;
-  font-family: "Noto Sans", "Helvetica Neue", "Helvetica", "Lucida Grande",
-    "Lucida Sans Unicode", "Liberation Sans", "Nimbus Sans", "Segoe UI", "Tahoma",
-    "DejaVu Sans", sans-serif;
+  font-family: "Inter", "Helvetica Neue", "Segoe UI", "DejaVu Sans", sans-serif;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 separator {
@@ -159,6 +157,7 @@ scale trough {
 scale highlight {
   background-color: #4a90e2;
   border-radius: 999px;
+  transition: all 100ms linear;
 }
 
 scale slider {
@@ -169,8 +168,13 @@ scale slider {
   min-width: 10px;
 }
 
+.seek-scale slider:hover {
+  min-height: 14px;
+  min-width: 14px;
+}
+
 .seek-scale trough {
-  min-height: 6px;
+  min-height: 8px;
 }
 
 .sidebar {
@@ -248,6 +252,11 @@ scale slider {
 
 .sidebar-action:active {
   background-color: #2b3442;
+}
+
+.sidebar-sleep-button {
+  min-width: 36px;
+  padding: 6px;
 }
 
 .sidebar-now-playing-art {
@@ -333,6 +342,8 @@ scale slider {
 
 .sidebar-list row:selected {
   background-color: #2b3442;
+  border-left: 3px solid #4a90e2;
+  padding-left: 7px;
 }
 
 .sidebar-list row:selected label {
@@ -642,7 +653,40 @@ scale slider {
 .library-loading-label {
   color: #9aa4b2;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
+}
+
+.library-loading-progress {
+  /* Slim pulsing bar below the loading label */
+  min-height: 4px;
+  border-radius: 999px;
+}
+
+.library-loading-progress trough {
+  background-color: #2a303a;
+  border-radius: 999px;
+  min-height: 4px;
+}
+
+.library-loading-progress progress {
+  background-color: #4a90e2;
+  border-radius: 999px;
+}
+
+.library-loading-sub-label {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.home-section-spinner {
+  color: #9aa4b2;
+  margin: 4px 0 2px;
+}
+
+.detail-loading-spinner {
+  color: #9aa4b2;
+  margin: 2px 0 4px;
 }
 
 .album-header {
@@ -759,7 +803,7 @@ popover.output-popover > contents {
   background: rgba(15, 23, 42, 0.35);
   border: 1px solid rgba(226, 232, 240, 0.3);
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 4px 8px;
   color: #e2e8f0;
 }
 
@@ -777,7 +821,7 @@ popover.output-popover > contents {
   border: 1px solid rgba(226, 232, 240, 0.3);
   border-radius: 6px;
   box-shadow: none;
-  padding: 6px 10px;
+  padding: 4px 8px;
   color: #e2e8f0;
 }
 
@@ -807,6 +851,12 @@ popover.output-popover > contents {
 .detail-artist {
   color: #cbd5e1;
   font-size: 13px;
+}
+
+.detail-action-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
 }
 
 .detail-artist-row {
@@ -1081,7 +1131,7 @@ popover.track-action-popover > contents {
 }
 
 .album-title {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 14px;
   color: #e6e9ef;
 }

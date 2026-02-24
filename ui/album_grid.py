@@ -94,7 +94,7 @@ def build_album_section(app) -> Gtk.Widget:
     overlay = Gtk.Overlay()
     overlay.set_child(scroller)
 
-    loading_overlay, spinner, loading_label = (
+    loading_overlay, spinner, loading_label, progress_bar, sub_label = (
         loading_spinner.create_loading_overlay()
     )
     overlay.add_overlay(loading_overlay)
@@ -102,6 +102,8 @@ def build_album_section(app) -> Gtk.Widget:
     app.library_loading_overlay = loading_overlay
     app.library_loading_spinner = spinner
     app.library_loading_label = loading_label
+    app.library_loading_progress_bar = progress_bar
+    app.library_loading_sub_label = sub_label
 
     return overlay
 
@@ -356,9 +358,9 @@ def on_album_activated(
         return
     app.albums_scroll_position = app.get_albums_scroll_position()
     app.album_detail_previous_view = "albums"
-    app.show_album_detail(album)
     if app.main_stack:
         app.main_stack.set_visible_child_name("album-detail")
+    app.show_album_detail(album)
 
 
 def populate_album_flow(app, albums: list) -> None:

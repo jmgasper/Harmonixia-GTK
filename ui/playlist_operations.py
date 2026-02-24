@@ -92,6 +92,22 @@ def set_playlist_detail_status(app, message: str) -> None:
     app.playlist_detail_status_label.set_visible(bool(message))
 
 
+def _show_playlist_spinner(app) -> None:
+    spinner = getattr(app, "playlist_detail_spinner", None)
+    if not spinner:
+        return
+    spinner.set_visible(True)
+    spinner.start()
+
+
+def _hide_playlist_spinner(app) -> None:
+    spinner = getattr(app, "playlist_detail_spinner", None)
+    if not spinner:
+        return
+    spinner.stop()
+    spinner.set_visible(False)
+
+
 def set_playlist_editable_state(app, playlist: dict) -> None:
     is_editable = _is_editable_playlist(playlist)
     app.playlist_detail_is_editable = is_editable
@@ -165,9 +181,11 @@ def load_playlist_tracks(
         update_playlist_detail_art(app, cached_tracks)
         populate_playlist_track_table(app, cached_tracks)
         set_playlist_detail_status(app, "")
+        _hide_playlist_spinner(app)
     else:
         populate_playlist_track_table(app, [])
         set_playlist_detail_status(app, "Loading tracks...")
+        _show_playlist_spinner(app)
 
     inflight = _get_playlist_tracks_inflight(app)
     if cache_key in inflight and not force_refresh:
@@ -402,6 +420,7 @@ def on_playlist_tracks_loaded(
     cache_key: tuple[str, str, str] | None = None,
     request_id: int | None = None,
 ) -> None:
+    _hide_playlist_spinner(app)
     if cache_key is not None:
         inflight = getattr(app, "playlist_tracks_inflight", None)
         if inflight:

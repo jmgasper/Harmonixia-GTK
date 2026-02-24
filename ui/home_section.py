@@ -14,13 +14,19 @@ def build_home_section(app) -> Gtk.Widget:
     header.set_xalign(0)
     home_box.append(header)
 
-    played_section, played_list, played_status = build_home_album_list(
+    (
+        played_section,
+        played_list,
+        played_status,
+        played_spinner,
+    ) = build_home_album_list(
         "Recently Played",
         "Play an album to see it here.",
     )
     played_list.album_app = app
     app.home_recently_played_list = played_list
     app.home_recently_played_status = played_status
+    app.home_recently_played_spinner = played_spinner
     home_box.append(played_section)
 
     recent_tracks_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -49,6 +55,13 @@ def build_home_section(app) -> Gtk.Widget:
     recent_tracks_scroller.set_vexpand(False)
     recent_tracks_section.append(recent_tracks_scroller)
 
+    recent_tracks_spinner = Gtk.Spinner()
+    recent_tracks_spinner.add_css_class("home-section-spinner")
+    recent_tracks_spinner.set_halign(Gtk.Align.START)
+    recent_tracks_spinner.set_visible(False)
+    recent_tracks_section.append(recent_tracks_spinner)
+    app.home_recent_tracks_spinner = recent_tracks_spinner
+
     recent_tracks_status = Gtk.Label(label="Play tracks to see them here.")
     recent_tracks_status.add_css_class("status-label")
     recent_tracks_status.set_xalign(0)
@@ -59,22 +72,30 @@ def build_home_section(app) -> Gtk.Widget:
     app.home_recent_tracks_status = recent_tracks_status
     home_box.append(recent_tracks_section)
 
-    added_section, added_list, added_status = build_home_album_list(
+    (
+        added_section,
+        added_list,
+        added_status,
+        added_spinner,
+    ) = build_home_album_list(
         "Recently Added Albums",
         "Recently added albums will appear here.",
     )
     added_list.album_app = app
     app.home_recently_added_list = added_list
     app.home_recently_added_status = added_status
+    app.home_recently_added_spinner = added_spinner
     home_box.append(added_section)
 
     (
         recommendations_container,
         recommendations_box,
         recommendations_status,
+        recommendations_spinner,
     ) = build_home_recommendations_container()
     app.home_recommendations_box = recommendations_box
     app.home_recommendations_status = recommendations_status
+    app.home_recommendations_spinner = recommendations_spinner
     home_box.append(recommendations_container)
 
     scroller = Gtk.ScrolledWindow()
@@ -98,7 +119,9 @@ def build_home_section(app) -> Gtk.Widget:
     return scroller
 
 
-def build_home_recommendations_container() -> tuple[Gtk.Widget, Gtk.Box, Gtk.Label]:
+def build_home_recommendations_container() -> tuple[
+    Gtk.Widget, Gtk.Box, Gtk.Label, Gtk.Spinner
+]:
     container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
 
     status = Gtk.Label(label="Recommendations will appear here.")
@@ -109,20 +132,26 @@ def build_home_recommendations_container() -> tuple[Gtk.Widget, Gtk.Box, Gtk.Lab
     status.empty_message = "Recommendations will appear here."
     container.append(status)
 
+    spinner = Gtk.Spinner()
+    spinner.add_css_class("home-section-spinner")
+    spinner.set_halign(Gtk.Align.START)
+    spinner.set_visible(False)
+    container.append(spinner)
+
     sections = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
     container.append(sections)
-    return container, sections, status
+    return container, sections, status, spinner
 
 
 def build_home_album_list(
     title: str, empty_message: str
-) -> tuple[Gtk.Widget, Gtk.FlowBox, Gtk.Label]:
+) -> tuple[Gtk.Widget, Gtk.FlowBox, Gtk.Label, Gtk.Spinner]:
     return build_home_media_list(title, empty_message, on_home_album_activated)
 
 
 def build_home_recommendation_list(
     title: str, empty_message: str
-) -> tuple[Gtk.Widget, Gtk.FlowBox, Gtk.Label]:
+) -> tuple[Gtk.Widget, Gtk.FlowBox, Gtk.Label, Gtk.Spinner]:
     return build_home_media_list(
         title,
         empty_message,
@@ -134,7 +163,7 @@ def build_home_media_list(
     title: str,
     empty_message: str,
     on_activate,
-) -> tuple[Gtk.Widget, Gtk.FlowBox, Gtk.Label]:
+) -> tuple[Gtk.Widget, Gtk.FlowBox, Gtk.Label, Gtk.Spinner]:
     section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
     section.add_css_class("search-group")
 
@@ -164,6 +193,12 @@ def build_home_media_list(
         )
     section.append(flow)
 
+    spinner = Gtk.Spinner()
+    spinner.add_css_class("home-section-spinner")
+    spinner.set_halign(Gtk.Align.START)
+    spinner.set_visible(False)
+    section.append(spinner)
+
     status = Gtk.Label(label=empty_message)
     status.add_css_class("status-label")
     status.set_xalign(0)
@@ -172,7 +207,7 @@ def build_home_media_list(
     status.empty_message = empty_message
     section.append(status)
 
-    return section, flow, status
+    return section, flow, status, spinner
 
 
 def _apply_home_layout(app, width: int) -> None:
@@ -267,7 +302,7 @@ def populate_home_recommendations(app, sections: list) -> None:
             "empty_message",
             "No recommendations available.",
         )
-        section, flow, status = build_home_recommendation_list(
+        section, flow, status, _spinner = build_home_recommendation_list(
             title, empty_message
         )
         flow.album_app = app

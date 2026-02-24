@@ -15,7 +15,7 @@ def build_sidebar(app) -> Gtk.Widget:
         "row-selected",
         lambda listbox, row: on_library_selected(app, listbox, row),
     )
-    home_row = make_sidebar_row("Home")
+    home_row = make_sidebar_row("Home", "go-home-symbolic")
     home_row.add_css_class("sidebar-primary")
     home_row.view_name = "home"
     home_list.append(home_row)
@@ -50,12 +50,12 @@ def build_sidebar(app) -> Gtk.Widget:
     )
     app.library_list = library_list
     library_rows = []
-    for item, view_name in [
-        ("Albums", "albums"),
-        ("Artists", "artists"),
-        ("Favorites", "favorites"),
+    for item, view_name, icon_name in [
+        ("Albums", "albums", "media-optical-symbolic"),
+        ("Artists", "artists", "avatar-default-symbolic"),
+        ("Favorites", "favorites", "starred-symbolic"),
     ]:
-        row = make_sidebar_row(item)
+        row = make_sidebar_row(item, icon_name)
         row.view_name = view_name
         library_list.append(row)
         library_rows.append(row)
@@ -260,18 +260,9 @@ def build_sidebar(app) -> Gtk.Widget:
 
     sleep_timer_button = Gtk.MenuButton()
     sleep_timer_button.add_css_class("sidebar-action")
-    sleep_timer_button.set_hexpand(True)
-    sleep_timer_button.set_halign(Gtk.Align.FILL)
+    sleep_timer_button.add_css_class("sidebar-sleep-button")
     sleep_timer_button.set_tooltip_text("Sleep Timer")
-    sleep_timer_content = Gtk.Box(
-        orientation=Gtk.Orientation.HORIZONTAL,
-        spacing=8,
-    )
-    sleep_timer_icon = Gtk.Image.new_from_icon_name("alarm-symbolic")
-    sleep_timer_label = Gtk.Label(label="Sleep", xalign=0)
-    sleep_timer_content.append(sleep_timer_icon)
-    sleep_timer_content.append(sleep_timer_label)
-    sleep_timer_button.set_child(sleep_timer_content)
+    sleep_timer_button.set_child(Gtk.Image.new_from_icon_name("alarm-symbolic"))
 
     sleep_timer_popover = Gtk.Popover()
     sleep_timer_popover.set_has_arrow(False)
@@ -336,6 +327,10 @@ def build_sidebar(app) -> Gtk.Widget:
     )
     app.settings_button = settings_button
 
+    action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    action_row.append(settings_button)
+    action_row.append(sleep_timer_button)
+
     action_area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
     action_area.set_margin_top(SIDEBAR_ACTION_MARGIN)
     action_area.set_margin_bottom(SIDEBAR_ACTION_MARGIN)
@@ -343,8 +338,7 @@ def build_sidebar(app) -> Gtk.Widget:
     action_area.set_margin_end(SIDEBAR_ACTION_MARGIN)
     action_area.append(now_playing_art)
     action_area.append(queue_controls)
-    action_area.append(sleep_timer_button)
-    action_area.append(settings_button)
+    action_area.append(action_row)
 
     container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
     container.add_css_class("sidebar")
@@ -373,12 +367,21 @@ def on_library_selected(
         app.playlists_list.unselect_all()
 
 
-def make_sidebar_row(text: str) -> Gtk.ListBoxRow:
+def make_sidebar_row(
+    text: str,
+    icon_name: str | None = None,
+) -> Gtk.ListBoxRow:
     row = Gtk.ListBoxRow()
     label = Gtk.Label(label=text, xalign=0)
     label.set_margin_top(2)
     label.set_margin_bottom(2)
-    row.set_child(label)
+    if icon_name:
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.append(Gtk.Image.new_from_icon_name(icon_name))
+        box.append(label)
+        row.set_child(box)
+    else:
+        row.set_child(label)
     return row
 
 
