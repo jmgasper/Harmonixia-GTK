@@ -3,7 +3,7 @@
 import logging
 import threading
 
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import Gdk, GLib, GObject, Gtk, Pango
 
 from constants import TRACK_ART_SIZE
 from music_assistant import playback
@@ -169,19 +169,16 @@ def on_queue_items_loaded(app, items: list[dict], error: str) -> None:
     if error:
         _set_queue_status(app, f"Unable to load queue: {error}")
         return
-    total_items = len(items)
     if operation_error:
         _set_queue_status(app, operation_error)
     if not items:
         if not operation_error:
             _set_queue_status(app, "Queue is empty.")
         return
-    for index, item in enumerate(items):
+    for item in items:
         row = _make_queue_row(
             app,
             item,
-            can_move_up=index > 0,
-            can_move_down=index < (total_items - 1),
         )
         app.queue_list.append(row)
     if not operation_error:
@@ -313,9 +310,6 @@ def _on_queue_cleared(app, error: str) -> bool:
 def _make_queue_row(
     app,
     item: dict,
-    *,
-    can_move_up: bool,
-    can_move_down: bool,
 ) -> Gtk.ListBoxRow:
     row = Gtk.ListBoxRow()
     row.queue_index = int(item.get("index", 0))
@@ -326,6 +320,10 @@ def _make_queue_row(
     content.set_margin_end(8)
     content.set_margin_top(6)
     content.set_margin_bottom(6)
+
+    drag_handle = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
+    drag_handle.add_css_class("queue-drag-handle")
+    drag_handle.set_valign(Gtk.Align.CENTER)
 
     art = Gtk.Picture()
     art.add_css_class("track-art")
@@ -361,33 +359,6 @@ def _make_queue_row(
     subtitle.set_ellipsize(Pango.EllipsizeMode.END)
     labels.append(subtitle)
 
-    move_buttons = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-    move_buttons.set_valign(Gtk.Align.CENTER)
-
-    move_up_button = Gtk.Button()
-    move_up_button.add_css_class("flat")
-    move_up_button.set_tooltip_text("Move up")
-    move_up_button.set_child(Gtk.Image.new_from_icon_name("go-up-symbolic"))
-    move_up_button.set_sensitive(can_move_up)
-    move_up_button.connect(
-        "clicked",
-        app.on_queue_item_move_clicked,
-        row.queue_item_id,
-        -1,
-    )
-
-    move_down_button = Gtk.Button()
-    move_down_button.add_css_class("flat")
-    move_down_button.set_tooltip_text("Move down")
-    move_down_button.set_child(Gtk.Image.new_from_icon_name("go-down-symbolic"))
-    move_down_button.set_sensitive(can_move_down)
-    move_down_button.connect(
-        "clicked",
-        app.on_queue_item_move_clicked,
-        row.queue_item_id,
-        1,
-    )
-
     remove_button = Gtk.Button()
     remove_button.add_css_class("flat")
     remove_button.set_tooltip_text("Remove from queue")
@@ -398,13 +369,58 @@ def _make_queue_row(
         row.queue_item_id,
     )
 
+    content.append(drag_handle)
     content.append(art)
     content.append(labels)
-    move_buttons.append(move_up_button)
-    move_buttons.append(move_down_button)
-    content.append(move_buttons)
     content.append(remove_button)
     row.set_child(content)
+
+    drag_source = Gtk.DragSource.new()
+    drag_source.set_actions(Gdk.DragAction.MOVE)
+
+    def on_drag_prepare(_source, _x, _y):
+        return Gdk.ContentProvider.new_for_value(
+            f"{row.queue_item_id}:{row.queue_index}",
+        )
+
+    drag_source.connect("prepare", on_drag_prepare)
+    row.add_controller(drag_source)
+
+    drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+
+    def on_drop(_target, value, _x, _y):
+        if not isinstance(value, str) or ":" not in value:
+            row.remove_css_class("queue-drop-target")
+            return False
+
+        source_item_id, source_index = value.split(":", 1)
+        if not source_item_id:
+            row.remove_css_class("queue-drop-target")
+            return False
+        try:
+            pos_shift = row.queue_index - int(source_index)
+        except (TypeError, ValueError):
+            row.remove_css_class("queue-drop-target")
+            return False
+        if pos_shift == 0:
+            row.remove_css_class("queue-drop-target")
+            return False
+
+        app.on_queue_item_move_clicked(None, source_item_id, pos_shift)
+        row.remove_css_class("queue-drop-target")
+        return True
+
+    def on_motion(_target, _x, _y):
+        row.add_css_class("queue-drop-target")
+        return Gdk.DragAction.MOVE
+
+    def on_leave(_target):
+        row.remove_css_class("queue-drop-target")
+
+    drop_target.connect("drop", on_drop)
+    drop_target.connect("motion", on_motion)
+    drop_target.connect("leave", on_leave)
+    row.add_controller(drop_target)
 
     if _is_current_queue_item(app, item):
         row.add_css_class("queue-current-item")

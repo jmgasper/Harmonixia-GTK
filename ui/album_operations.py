@@ -291,6 +291,81 @@ def _apply_album_detail_metadata(
     _set_album_track_summary_label(app, summary)
 
 
+def _extract_album_genres(album: object) -> list[str]:
+    def _iter_genres(value: object):
+        if not value:
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                yield item
+            return
+        yield value
+
+    genres: list[str] = []
+    seen: set[str] = set()
+
+    def _add_genres(value: object) -> None:
+        if len(genres) >= 8:
+            return
+        for item in _iter_genres(value):
+            if isinstance(item, dict):
+                name = item.get("name")
+            else:
+                name = (
+                    item
+                    if isinstance(item, str)
+                    else getattr(item, "name", None)
+                )
+            if name is None:
+                name = item if isinstance(item, str) else None
+            if not isinstance(name, str):
+                continue
+            genre = name.strip()
+            if not genre:
+                continue
+            key = genre.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            genres.append(genre)
+            if len(genres) >= 8:
+                return
+
+    if isinstance(album, dict):
+        _add_genres(album.get("genres"))
+        metadata = album.get("metadata", {})
+        if isinstance(metadata, dict):
+            _add_genres(metadata.get("genres"))
+        else:
+            _add_genres(getattr(metadata, "genres", None))
+    else:
+        _add_genres(getattr(album, "genres", None))
+        metadata = getattr(album, "metadata", None)
+        if isinstance(metadata, dict):
+            _add_genres(metadata.get("genres"))
+        else:
+            _add_genres(getattr(metadata, "genres", None))
+    return genres
+
+
+def _populate_genre_pills(app, genres: list[str]) -> None:
+    genre_box = getattr(app, "album_detail_genre_box", None)
+    if not genre_box:
+        return
+    child = genre_box.get_first_child()
+    while child is not None:
+        next_child = child.get_next_sibling()
+        genre_box.remove(child)
+        child = next_child
+    for genre in genres:
+        label = Gtk.Label(label=genre)
+        label.add_css_class("genre-pill")
+        flow_child = Gtk.FlowBoxChild()
+        flow_child.set_child(label)
+        genre_box.append(flow_child)
+    genre_box.set_visible(bool(genres))
+
+
 def show_album_detail(app, album: dict) -> None:
     app.current_album = album
     album_name = get_album_name(album)
@@ -326,6 +401,7 @@ def show_album_detail(app, album: dict) -> None:
         app.album_detail_artist_button.set_sensitive(bool(primary_artist))
 
     _apply_album_detail_metadata(app, album)
+    _populate_genre_pills(app, _extract_album_genres(album))
     artist_image_url = _extract_primary_artist_image_url(album, app.server_url)
     _set_album_artist_image(app, artist_image_url)
 
@@ -550,8 +626,13 @@ def populate_track_table(app, tracks: list[dict]) -> None:
     album_image_url = image_loader.extract_media_image_url(
         app.current_album, app.server_url
     )
+    track_rows: list[TrackRow] = []
     for track in tracks:
+        disc_number = _coerce_int(track.get("disc_number"))
+        if disc_number is None or disc_number <= 0:
+            disc_number = 1
         row = TrackRow(
+            disc_number=disc_number,
             track_number=track.get("track_number", 0),
             title=track.get("title", ""),
             length_display=track.get("length_display", ""),
@@ -567,8 +648,45 @@ def populate_track_table(app, tracks: list[dict]) -> None:
             row.image_url = track_image_url
         elif album_image_url:
             row.image_url = album_image_url
+        track_rows.append(row)
+
+    disc_column = getattr(app, "album_detail_disc_column", None)
+    display_rows: list[TrackRow] = list(track_rows)
+    disc_numbers = [
+        (_coerce_int(getattr(row, "disc_number", 1)) or 1) for row in track_rows
+    ]
+    if disc_numbers and max(disc_numbers) > 1:
+        sorted_rows = sorted(
+            track_rows,
+            key=lambda row: (
+                (_coerce_int(getattr(row, "disc_number", 1)) or 1),
+                (_coerce_int(getattr(row, "track_number", 0)) or 0),
+            ),
+        )
+        display_rows = []
+        current_disc: int | None = None
+        for row in sorted_rows:
+            row_disc = _coerce_int(getattr(row, "disc_number", 1)) or 1
+            if row_disc != current_disc:
+                current_disc = row_disc
+                display_rows.append(
+                    TrackRow(
+                        disc_number=row_disc,
+                        is_disc_header=True,
+                    )
+                )
+            display_rows.append(row)
+        app.current_album_tracks = list(sorted_rows)
+        if disc_column is not None:
+            disc_column.set_visible(True)
+    else:
+        app.current_album_tracks = list(track_rows)
+        if disc_column is not None:
+            disc_column.set_visible(False)
+
+    for row in display_rows:
         app.album_tracks_store.append(row)
-        app.current_album_tracks.append(row)
+
     if app.album_tracks_view and app.album_tracks_selection:
         app.album_tracks_view.set_model(app.album_tracks_selection)
     app.sync_playback_highlight()

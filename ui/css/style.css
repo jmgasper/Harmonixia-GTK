@@ -148,6 +148,19 @@ entry:focus {
   border-color: #3a4454;
 }
 
+.favorites-filter-entry {
+  background-color: #141a22;
+  border: 1px solid #2a303a;
+  border-radius: 6px;
+  color: #e6e9ef;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.favorites-filter-entry:focus {
+  border-color: #3a4454;
+}
+
 scale trough {
   background-color: #2a303a;
   border-radius: 999px;
@@ -901,6 +914,30 @@ popover.output-popover > contents {
   opacity: 0.7;
 }
 
+/* Artist detail - prominent avatar */
+.artist-detail-art {
+  background-color: #1b212b;
+  border: 1px solid #2a303a;
+  border-radius: 999px;          /* circular */
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.18);
+}
+
+/* Biography expander */
+.artist-bio-expander title {
+  color: #9aa4b2;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+/* Biography text view */
+.artist-bio-text {
+  background-color: transparent;
+  color: #b9c5d7;
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .detail-play {
   padding: 6px;
   min-width: 36px;
@@ -1040,6 +1077,22 @@ columnview.track-table listview listitem:hover {
 .queue-list row.queue-current-item label {
   color: #f1f5f9;
   font-weight: 700;
+}
+
+.queue-drag-handle {
+  color: #4a5568;
+  margin-right: 2px;
+  opacity: 0.6;
+}
+
+.queue-list row:hover .queue-drag-handle {
+  opacity: 1;
+  color: #9aa4b2;
+}
+
+.queue-list row.queue-drop-target {
+  background-color: rgba(74, 144, 226, 0.12);
+  border-top: 2px solid #4a90e2;
 }
 
 .artist-list separator {
@@ -1217,4 +1270,112 @@ popover.track-action-popover > contents {
 
 .toast.toast-hidden {
   opacity: 0;
+}
+
+/* Sleep timer active state */
+.sidebar-sleep-button.sleep-timer-active {
+  border-color: #4a90e2;
+  color: #4a90e2;
+}
+
+.sidebar-sleep-button.sleep-timer-active image {
+  color: #4a90e2;
+}
+
+/* Live countdown label */
+.sleep-timer-countdown {
+  color: #9aa4b2;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Genre pill badges */
+.genre-pill-box {
+  /* spacing handled by FlowBox properties */
+}
+
+.genre-pill {
+  background-color: rgba(74, 144, 226, 0.15);
+  border: 1px solid rgba(74, 144, 226, 0.4);
+  border-radius: 999px;
+  color: #93c5fd;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+}
+
+/* Disc header sentinel rows */
+.disc-header-label {
+  color: #9aa4b2;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+}
+
+@keyframes eq-bounce-1 {
+  0%,
+  100% {
+    min-height: 3px;
+  }
+  50% {
+    min-height: 12px;
+  }
+}
+
+@keyframes eq-bounce-2 {
+  0%,
+  100% {
+    min-height: 6px;
+  }
+  50% {
+    min-height: 3px;
+  }
+}
+
+@keyframes eq-bounce-3 {
+  0%,
+  100% {
+    min-height: 4px;
+  }
+  50% {
+    min-height: 10px;
+  }
+}
+
+.eq-bars {
+  spacing: 2px;
+}
+
+.eq-bar {
+  background-color: #16a34a;
+  border-radius: 2px;
+  min-width: 3px;
+  min-height: 3px;
+  animation-duration: 0.75s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+.eq-bar-1 {
+  animation-name: eq-bounce-1;
+  animation-delay: 0s;
+}
+
+.eq-bar-2 {
+  animation-name: eq-bounce-2;
+  animation-delay: 0.18s;
+}
+
+.eq-bar-3 {
+  animation-name: eq-bounce-3;
+  animation-delay: 0.36s;
+}
+
+.sidebar-eq-bars {
+  background-color: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  padding: 3px 4px;
 }

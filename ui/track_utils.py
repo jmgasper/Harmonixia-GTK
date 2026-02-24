@@ -8,6 +8,15 @@ def serialize_track(
     title = getattr(track, "name", None) or "Unknown Track"
     track_number = getattr(track, "track_number", 0) or 0
     duration = getattr(track, "duration", 0) or 0
+    disc_number = (
+        getattr(track, "disc_number", None)
+        or getattr(track, "disc_no", None)
+        or 1
+    )
+    try:
+        disc_number = int(disc_number)
+    except (TypeError, ValueError):
+        disc_number = 1
 
     artist = getattr(track, "artist_str", None)
     if not artist:
@@ -50,6 +59,7 @@ def serialize_track(
     else:
         is_favorite = bool(getattr(track, "favorite", False))
     return {
+        "disc_number": disc_number,
         "track_number": track_number,
         "title": title,
         "length_display": format_duration_fn(duration),

@@ -1,5 +1,6 @@
-from gi.repository import Gtk
+from gi.repository import Gtk, Pango
 
+from constants import DETAIL_ART_SIZE
 from ui import track_table, ui_utils
 
 
@@ -18,13 +19,56 @@ def build_artist_albums_section(app) -> Gtk.Widget:
     back_button.set_child(back_content)
     back_button.connect("clicked", app.on_artist_albums_back)
     top_bar.append(back_button)
-
-    title = Gtk.Label(label="Artist", xalign=0)
-    title.add_css_class("home-title")
-    title.set_hexpand(True)
-    title.set_halign(Gtk.Align.FILL)
-    top_bar.append(title)
     container.append(top_bar)
+
+    artist_header = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=16,
+    )
+
+    artist_art = Gtk.Picture()
+    artist_art.add_css_class("artist-detail-art")
+    artist_art.set_size_request(DETAIL_ART_SIZE, DETAIL_ART_SIZE)
+    artist_art.set_halign(Gtk.Align.START)
+    artist_art.set_valign(Gtk.Align.START)
+    artist_art.set_can_shrink(True)
+    if hasattr(artist_art, "set_content_fit") and hasattr(Gtk, "ContentFit"):
+        artist_art.set_content_fit(Gtk.ContentFit.COVER)
+
+    artist_info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    artist_info.set_vexpand(False)
+
+    title = Gtk.Label(label="Artist")
+    title.add_css_class("detail-title")
+    title.set_wrap(True)
+    title.set_ellipsize(Pango.EllipsizeMode.END)
+    title.set_xalign(0)
+
+    bio_expander = Gtk.Expander(label="Biography")
+    bio_expander.add_css_class("artist-bio-expander")
+    bio_expander.set_expanded(False)
+    bio_expander.set_visible(False)
+
+    bio_scroll = Gtk.ScrolledWindow()
+    bio_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    bio_scroll.set_max_content_height(140)
+
+    bio_text_view = Gtk.TextView()
+    bio_text_view.set_editable(False)
+    bio_text_view.set_cursor_visible(False)
+    bio_text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    bio_text_view.set_left_margin(4)
+    bio_text_view.set_right_margin(4)
+    bio_text_view.add_css_class("artist-bio-text")
+    bio_scroll.set_child(bio_text_view)
+    bio_expander.set_child(bio_scroll)
+
+    artist_info.append(title)
+    artist_info.append(bio_expander)
+
+    artist_header.append(artist_art)
+    artist_header.append(artist_info)
+    container.append(artist_header)
 
     status = Gtk.Label()
     status.add_css_class("status-label")
@@ -62,6 +106,7 @@ def build_artist_albums_section(app) -> Gtk.Widget:
         sort_model_attr="artist_tracks_sort_model",
         selection_attr="artist_tracks_selection",
         view_attr="artist_tracks_view",
+        disc_column_attr="artist_tracks_disc_column",
         use_track_art=True,
         include_album_column=False,
         action_labels=(
@@ -95,6 +140,9 @@ def build_artist_albums_section(app) -> Gtk.Widget:
 
     app.artist_albums_view = scroller
     app.artist_albums_title = title
+    app.artist_detail_art = artist_art
+    app.artist_bio_expander = bio_expander
+    app.artist_bio_text_view = bio_text_view
     app.artist_albums_header = albums_header
     app.artist_albums_status_label = status
     app.artist_albums_flow = flow

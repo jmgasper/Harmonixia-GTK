@@ -41,6 +41,7 @@ def build_home_section(app) -> Gtk.Widget:
         sort_model_attr="home_recent_tracks_sort_model",
         selection_attr="home_recent_tracks_selection",
         view_attr="home_recent_tracks_view",
+        disc_column_attr="home_recent_tracks_disc_column",
         use_track_art=True,
         include_album_column=True,
     )

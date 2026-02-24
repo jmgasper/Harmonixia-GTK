@@ -2,7 +2,7 @@ import threading
 
 from gi.repository import GLib, Gtk
 
-from constants import MEDIA_TILE_SIZE
+from constants import DETAIL_ART_SIZE, MEDIA_TILE_SIZE
 from music_assistant_client import MusicAssistantClient
 from ui import image_loader, ui_utils
 from ui import track_utils
@@ -58,6 +58,7 @@ def refresh_artist_albums(app) -> None:
     populate_artist_album_flow(app, albums)
     update_artist_albums_status(app, artist_name, albums)
     _start_artist_top_tracks_refresh(app, artist, artist_name)
+    _start_artist_bio_refresh(app, artist)
 
 
 def update_artist_albums_header(
@@ -144,6 +145,53 @@ def get_artist_name(artist: object) -> str:
     return name or "Unknown Artist"
 
 
+def _get_artist_item_id(artist: object) -> str | None:
+    if isinstance(artist, dict):
+        item_id = artist.get("item_id") or artist.get("id")
+    else:
+        item_id = getattr(artist, "item_id", None) or getattr(
+            artist,
+            "id",
+            None,
+        )
+    if item_id is None:
+        return None
+    item_id_value = str(item_id).strip()
+    return item_id_value or None
+
+
+def _extract_artist_bio(artist: object) -> str:
+    metadata = None
+    if isinstance(artist, dict):
+        metadata = artist.get("metadata")
+    else:
+        metadata = getattr(artist, "metadata", None)
+
+    if isinstance(metadata, dict):
+        for key in ("description", "biography", "bio"):
+            value = metadata.get(key)
+            if isinstance(value, str):
+                text = value.strip()
+                if text:
+                    return text
+        return ""
+
+    for key in ("description", "biography", "bio"):
+        value = getattr(metadata, key, None) if metadata is not None else None
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return ""
+
+
+def _extract_artist_image_url(
+    artist: object,
+    server_url: str,
+) -> str | None:
+    return image_loader.extract_media_image_url(artist, server_url)
+
+
 def filter_artist_albums(app, artist_name: str) -> list[dict]:
     normalized = normalize_artist_name(artist_name)
     if not normalized:
@@ -190,6 +238,25 @@ def _start_artist_top_tracks_refresh(
     thread.start()
 
 
+def _start_artist_bio_refresh(app, artist: object) -> None:
+    if getattr(app, "artist_detail_art", None):
+        app.artist_detail_art.set_paintable(None)
+    if getattr(app, "artist_bio_expander", None):
+        app.artist_bio_expander.set_visible(False)
+    if not app.server_url:
+        bio = _extract_artist_bio(artist)
+        image_url = _extract_artist_image_url(artist, app.server_url or "")
+        GLib.idle_add(app.on_artist_bio_loaded, artist, bio, image_url, "")
+        return
+    provider = _get_artist_provider(artist)
+    thread = threading.Thread(
+        target=_load_artist_bio_worker,
+        args=(app, artist, provider),
+        daemon=True,
+    )
+    thread.start()
+
+
 def _load_artist_top_tracks_worker(
     app,
     artist: object,
@@ -209,6 +276,27 @@ def _load_artist_top_tracks_worker(
     except Exception as exc:
         error = str(exc)
     GLib.idle_add(app.on_artist_top_tracks_loaded, artist, tracks, error)
+
+
+def _load_artist_bio_worker(
+    app,
+    artist: object,
+    provider: str | None,
+) -> None:
+    error = ""
+    bio = ""
+    image_url: str | None = None
+    try:
+        bio, image_url = app.client_session.run(
+            app.server_url,
+            app.auth_token,
+            app._fetch_artist_bio_async,
+            artist,
+            provider,
+        )
+    except Exception as exc:
+        error = str(exc)
+    GLib.idle_add(app.on_artist_bio_loaded, artist, bio, image_url, error)
 
 
 async def _fetch_artist_top_tracks_async(
@@ -246,6 +334,40 @@ async def _fetch_artist_top_tracks_async(
     return serialized
 
 
+async def _fetch_artist_bio_async(
+    app,
+    client: MusicAssistantClient,
+    artist: object,
+    provider: str | None,
+) -> tuple[str, str | None]:
+    bio = ""
+    image_url = None
+    fetch_failed = False
+    item_id = _get_artist_item_id(artist)
+    if item_id and provider:
+        try:
+            full_artist = await client.music.get_artist(item_id, provider)
+            bio = _extract_artist_bio(full_artist)
+            image_url = image_loader.resolve_media_item_image_url(
+                client,
+                full_artist,
+                app.server_url,
+            )
+        except Exception:
+            fetch_failed = True
+    if fetch_failed or not bio:
+        fallback_bio = _extract_artist_bio(artist)
+        fallback_image_url = _extract_artist_image_url(
+            artist,
+            app.server_url,
+        )
+        if fallback_bio:
+            bio = fallback_bio
+        if fallback_image_url:
+            image_url = fallback_image_url
+    return bio, image_url
+
+
 def on_artist_top_tracks_loaded(
     app,
     artist: object,
@@ -259,6 +381,35 @@ def on_artist_top_tracks_loaded(
     if error:
         return
     _populate_artist_tracks_store(app, tracks)
+
+
+def on_artist_bio_loaded(
+    app,
+    artist: object,
+    bio: str,
+    image_url: str | None,
+    error: str,
+) -> None:
+    if normalize_artist_name(get_artist_name(artist)) != normalize_artist_name(
+        get_artist_name(getattr(app, "current_artist", None))
+    ):
+        return
+    if bio and getattr(app, "artist_bio_text_view", None):
+        buffer = app.artist_bio_text_view.get_buffer()
+        buffer.set_text(bio, -1)
+        if getattr(app, "artist_bio_expander", None):
+            app.artist_bio_expander.set_visible(True)
+    elif getattr(app, "artist_bio_expander", None):
+        app.artist_bio_expander.set_visible(False)
+    if image_url and getattr(app, "artist_detail_art", None):
+        image_loader.load_album_art_async(
+            app.artist_detail_art,
+            image_url,
+            DETAIL_ART_SIZE,
+            app.auth_token,
+            app.image_executor,
+            app.get_cache_dir(),
+        )
 
 
 def _populate_artist_tracks_store(app, tracks: list[dict]) -> None:

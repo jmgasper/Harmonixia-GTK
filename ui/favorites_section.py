@@ -1,6 +1,6 @@
 from gi.repository import Gtk, Pango
 
-from ui import track_table
+from ui import favorites_manager, track_table
 
 
 def build_favorites_section(app) -> Gtk.Widget:
@@ -48,6 +48,44 @@ def build_favorites_section(app) -> Gtk.Widget:
     subtitle.set_ellipsize(Pango.EllipsizeMode.END)
     header.append(title)
     header.append(subtitle)
+
+    controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    controls_row.set_halign(Gtk.Align.START)
+
+    play_button = Gtk.Button()
+    play_button.add_css_class("suggested-action")
+    play_button.add_css_class("detail-play")
+    play_button.set_halign(Gtk.Align.START)
+    play_button.set_tooltip_text("Play all")
+    play_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
+    play_icon.set_pixel_size(18)
+    play_button.set_child(play_icon)
+    play_button.set_sensitive(False)
+    play_button.set_visible(False)
+    play_button.connect(
+        "clicked",
+        lambda _btn: favorites_manager.on_favorites_play_clicked(app),
+    )
+    controls_row.append(play_button)
+
+    shuffle_icon_name = app.pick_icon_name(
+        ["media-playlist-shuffle-symbolic", "media-playlist-shuffle"]
+    )
+    shuffle_button = Gtk.Button()
+    shuffle_button.add_css_class("detail-play")
+    shuffle_button.set_halign(Gtk.Align.START)
+    shuffle_button.set_tooltip_text("Shuffle play")
+    shuffle_icon = Gtk.Image.new_from_icon_name(shuffle_icon_name)
+    shuffle_icon.set_pixel_size(18)
+    shuffle_button.set_child(shuffle_icon)
+    shuffle_button.set_sensitive(False)
+    shuffle_button.set_visible(False)
+    shuffle_button.connect(
+        "clicked",
+        lambda _btn: favorites_manager.on_favorites_shuffle_clicked(app),
+    )
+    controls_row.append(shuffle_button)
+    header.append(controls_row)
     container.append(header)
 
     tracks_label = Gtk.Label(label="Tracks")
@@ -62,12 +100,23 @@ def build_favorites_section(app) -> Gtk.Widget:
     status.set_visible(False)
     container.append(status)
 
+    filter_entry = Gtk.Entry()
+    filter_entry.set_placeholder_text("Filter by title or artist…")
+    filter_entry.add_css_class("favorites-filter-entry")
+    filter_entry.set_hexpand(True)
+    filter_entry.connect(
+        "changed",
+        lambda entry, *_: favorites_manager.on_favorites_filter_changed(app, entry),
+    )
+    container.append(filter_entry)
+
     tracks_table = track_table.build_tracks_table(
         app,
         store_attr="favorites_tracks_store",
         sort_model_attr="favorites_tracks_sort_model",
         selection_attr="favorites_tracks_selection",
         view_attr="favorites_tracks_view",
+        disc_column_attr="favorites_tracks_disc_column",
         use_track_art=True,
     )
     tracks_scroller = Gtk.ScrolledWindow()
@@ -83,4 +132,7 @@ def build_favorites_section(app) -> Gtk.Widget:
     overlay.add_overlay(container)
 
     app.favorites_status_label = status
+    app.favorites_play_button = play_button
+    app.favorites_shuffle_button = shuffle_button
+    app.favorites_filter_entry = filter_entry
     return overlay

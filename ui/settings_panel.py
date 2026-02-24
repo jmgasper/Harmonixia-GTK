@@ -296,6 +296,38 @@ def build_settings_section(app) -> Gtk.Widget:
     gtk_card.append(gtk_grid)
     settings_box.append(gtk_card)
 
+    ui_preferences_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    ui_preferences_card.add_css_class("settings-card")
+    ui_preferences_header = Gtk.Label(label="UI Preferences")
+    ui_preferences_header.set_xalign(0)
+    ui_preferences_header.set_margin_top(2)
+    ui_preferences_header.set_margin_bottom(4)
+    ui_preferences_card.append(ui_preferences_header)
+
+    ui_preferences_hint = Gtk.Label(
+        label=(
+            "Resets tile size, sort order, search scope, and sidebar width to defaults."
+        )
+    )
+    ui_preferences_hint.add_css_class("status-label")
+    ui_preferences_hint.set_xalign(0)
+    ui_preferences_hint.set_wrap(True)
+    ui_preferences_card.append(ui_preferences_hint)
+
+    ui_preferences_actions = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=10,
+    )
+    reset_button = Gtk.Button(label="Reset to defaults")
+    reset_button.add_css_class("destructive-action")
+    reset_button.connect(
+        "clicked",
+        lambda _button: app.reset_ui_preferences(),
+    )
+    ui_preferences_actions.append(reset_button)
+    ui_preferences_card.append(ui_preferences_actions)
+    settings_box.append(ui_preferences_card)
+
     if os.getenv("MA_GTK_DEBUG"):
         gtk_debug_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         gtk_debug_card.add_css_class("settings-card")

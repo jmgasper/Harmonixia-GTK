@@ -280,6 +280,8 @@ def on_album_sort_toggled(
     if getattr(app, "album_sort_order", None) == order_value:
         return
     app.album_sort_order = order_value
+    if hasattr(app, "persist_album_density"):
+        app.persist_album_density()
     app.load_library()
 
 

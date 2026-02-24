@@ -119,6 +119,14 @@ def build_album_detail_section(app) -> Gtk.Widget:
     metadata_box.append(release_year_label)
     metadata_box.append(track_summary_label)
 
+    genre_box = Gtk.FlowBox()
+    genre_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+    genre_box.set_selection_mode(Gtk.SelectionMode.NONE)
+    genre_box.set_column_spacing(6)
+    genre_box.set_row_spacing(4)
+    genre_box.set_visible(False)
+    genre_box.add_css_class("genre-pill-box")
+
     play_button = Gtk.Button()
     play_button.add_css_class("suggested-action")
     play_button.add_css_class("detail-play")
@@ -205,6 +213,7 @@ def build_album_detail_section(app) -> Gtk.Widget:
     info.append(title)
     info.append(artist_button)
     info.append(metadata_box)
+    info.append(genre_box)
     info.append(controls_row)
 
     header.append(art)
@@ -234,6 +243,7 @@ def build_album_detail_section(app) -> Gtk.Widget:
     tracks_table = track_table.build_tracks_table(
         app,
         include_album_column=False,
+        disc_column_attr="album_detail_disc_column",
     )
     tracks_scroller = Gtk.ScrolledWindow()
     tracks_scroller.set_policy(
@@ -256,6 +266,7 @@ def build_album_detail_section(app) -> Gtk.Widget:
     app.album_detail_artist_button = artist_button
     app.album_detail_release_year = release_year_label
     app.album_detail_track_summary = track_summary_label
+    app.album_detail_genre_box = genre_box
     app.album_detail_status_label = status
     app.album_detail_spinner = spinner
     app.album_detail_play_button = play_button

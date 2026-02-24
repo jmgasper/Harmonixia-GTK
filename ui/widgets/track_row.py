@@ -10,6 +10,8 @@ from gi.repository import GObject
 class TrackRow(GObject.GObject):
     """GObject wrapper for track data in the track table."""
 
+    disc_number = GObject.Property(type=int, default=1)
+    is_disc_header = GObject.Property(type=bool, default=False)
     track_number = GObject.Property(type=int, default=0)
     title = GObject.Property(type=str, default="")
     length_display = GObject.Property(type=str, default="")

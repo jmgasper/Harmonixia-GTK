@@ -7,7 +7,7 @@ def start_sleep_timer(app, minutes: int) -> None:
     cancel_sleep_timer(app)
     duration_minutes = max(1, int(minutes))
     app.sleep_timer_remaining_seconds = duration_minutes * 60
-    app.sleep_timer_id = GLib.timeout_add(60_000, app._sleep_timer_tick)
+    app.sleep_timer_id = GLib.timeout_add(1_000, app._sleep_timer_tick)
     _update_sleep_timer_tooltip(app)
 
 
@@ -25,7 +25,7 @@ def cancel_sleep_timer(app) -> None:
 
 def _sleep_timer_tick(app) -> bool:
     remaining = int(getattr(app, "sleep_timer_remaining_seconds", 0))
-    remaining -= 60
+    remaining -= 1
     app.sleep_timer_remaining_seconds = max(0, remaining)
     if app.sleep_timer_remaining_seconds <= 0:
         cancel_sleep_timer(app)
@@ -37,11 +37,27 @@ def _sleep_timer_tick(app) -> bool:
 
 def _update_sleep_timer_tooltip(app) -> None:
     button = getattr(app, "sleep_timer_button", None)
-    if not button:
-        return
     remaining = int(getattr(app, "sleep_timer_remaining_seconds", 0))
-    if remaining > 0:
-        minutes = max(1, remaining // 60)
-        button.set_tooltip_text(f"Sleep: {minutes} min")
-    else:
-        button.set_tooltip_text("Sleep Timer")
+    if button:
+        if remaining > 0:
+            minutes = max(1, remaining // 60)
+            button.set_tooltip_text(f"Sleep: {minutes} min")
+        else:
+            button.set_tooltip_text("Sleep Timer")
+
+    countdown_label = getattr(app, "sleep_timer_countdown_label", None)
+    if countdown_label:
+        if remaining > 0:
+            mins = remaining // 60
+            secs = remaining % 60
+            countdown_label.set_text(f"{mins}:{secs:02d}")
+            countdown_label.set_visible(True)
+        else:
+            countdown_label.set_visible(False)
+            countdown_label.set_text("")
+
+    if button:
+        if remaining > 0:
+            button.add_css_class("sleep-timer-active")
+        else:
+            button.remove_css_class("sleep-timer-active")

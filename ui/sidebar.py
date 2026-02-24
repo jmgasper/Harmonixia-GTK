@@ -1,6 +1,7 @@
 from gi.repository import Gtk
 
 from constants import SIDEBAR_WIDTH, SIDEBAR_ART_SIZE, SIDEBAR_ACTION_MARGIN
+from ui.widgets.eq_bars import make_eq_bars_widget
 
 
 def build_sidebar(app) -> Gtk.Widget:
@@ -153,6 +154,18 @@ def build_sidebar(app) -> Gtk.Widget:
     context_gesture.connect("pressed", app.on_now_playing_art_context_menu)
     now_playing_art.add_controller(context_gesture)
     app.sidebar_now_playing_art = now_playing_art
+    art_overlay = Gtk.Overlay()
+    art_overlay.set_child(now_playing_art)
+
+    bars_badge = make_eq_bars_widget(size=20)
+    bars_badge.add_css_class("sidebar-eq-bars")
+    bars_badge.set_halign(Gtk.Align.END)
+    bars_badge.set_valign(Gtk.Align.END)
+    bars_badge.set_margin_end(6)
+    bars_badge.set_margin_bottom(6)
+    bars_badge.set_visible(False)
+    art_overlay.add_overlay(bars_badge)
+    app.sidebar_playing_bars = bars_badge
 
     now_playing_popover = Gtk.Popover()
     now_playing_popover.set_has_arrow(False)
@@ -291,6 +304,32 @@ def build_sidebar(app) -> Gtk.Widget:
             ),
         )
         sleep_timer_box.append(preset_button)
+    sleep_timer_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+    custom_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+    custom_adjustment = Gtk.Adjustment.new(
+        value=20,
+        lower=1,
+        upper=480,
+        step_increment=1,
+        page_increment=10,
+        page_size=0,
+    )
+    spin_button = Gtk.SpinButton.new(custom_adjustment, 1, 0)
+    spin_button.add_css_class("track-action-item")
+    spin_button.set_hexpand(True)
+    set_sleep_button = Gtk.Button(label="Set")
+    set_sleep_button.add_css_class("track-action-item")
+    set_sleep_button.connect(
+        "clicked",
+        lambda _button: _on_sleep_timer_selected(
+            app,
+            sleep_timer_popover,
+            spin_button.get_value_as_int(),
+        ),
+    )
+    custom_row_box.append(spin_button)
+    custom_row_box.append(set_sleep_button)
+    sleep_timer_box.append(custom_row_box)
     cancel_sleep_button = Gtk.Button(label="Cancel")
     cancel_sleep_button.set_halign(Gtk.Align.FILL)
     cancel_sleep_button.set_hexpand(True)
@@ -331,13 +370,20 @@ def build_sidebar(app) -> Gtk.Widget:
     action_row.append(settings_button)
     action_row.append(sleep_timer_button)
 
+    countdown_label = Gtk.Label(label="")
+    countdown_label.add_css_class("sleep-timer-countdown")
+    countdown_label.set_halign(Gtk.Align.CENTER)
+    countdown_label.set_visible(False)
+    app.sleep_timer_countdown_label = countdown_label
+
     action_area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
     action_area.set_margin_top(SIDEBAR_ACTION_MARGIN)
     action_area.set_margin_bottom(SIDEBAR_ACTION_MARGIN)
     action_area.set_margin_start(SIDEBAR_ACTION_MARGIN)
     action_area.set_margin_end(SIDEBAR_ACTION_MARGIN)
-    action_area.append(now_playing_art)
+    action_area.append(art_overlay)
     action_area.append(queue_controls)
+    action_area.append(countdown_label)
     action_area.append(action_row)
 
     container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)

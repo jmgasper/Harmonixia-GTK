@@ -172,6 +172,7 @@ def build_playlist_detail_section(app) -> Gtk.Widget:
         sort_model_attr="playlist_tracks_sort_model",
         selection_attr="playlist_tracks_selection",
         view_attr="playlist_tracks_view",
+        disc_column_attr="playlist_tracks_disc_column",
         action_labels=("Play", "Remove from this playlist"),
         use_track_art=True,
     )

@@ -4,6 +4,7 @@ from gi.repository import Gio, GObject, Gtk, Pango
 
 from constants import TRACK_ART_SIZE
 from ui import image_loader
+from ui.widgets.eq_bars import make_eq_bars_widget
 from ui.widgets.track_row import TrackRow
 
 DEFAULT_ACTION_LABELS = (
@@ -46,6 +47,7 @@ def build_tracks_table(
     action_labels: tuple[str, ...] | None = None,
     use_track_art: bool = False,
     include_album_column: bool = True,
+    disc_column_attr: str = "album_detail_disc_column",
 ) -> Gtk.Widget:
     store = Gio.ListStore.new(TrackRow)
     sort_model = Gtk.SortListModel.new(store, None)
@@ -69,6 +71,7 @@ def build_tracks_table(
     sort_model.set_sorter(view.get_sorter())
 
     playing_column = make_playing_indicator_column(app)
+    disc_column = make_disc_column(app)
     if use_track_art:
         leading_column = make_track_art_column(app)
     else:
@@ -102,6 +105,9 @@ def build_tracks_table(
     actions_column = make_actions_column(app, action_labels=action_labels)
 
     view.append_column(playing_column)
+    view.append_column(disc_column)
+    disc_column.set_visible(False)
+    setattr(app, disc_column_attr, disc_column)
     view.append_column(leading_column)
     view.append_column(title_column)
     view.append_column(length_column)
@@ -139,6 +145,76 @@ def make_playing_indicator_column(app) -> Gtk.ColumnViewColumn:
     return column
 
 
+def make_disc_column(app) -> Gtk.ColumnViewColumn:
+    factory = Gtk.SignalListItemFactory()
+    factory.connect(
+        "setup",
+        lambda factory, list_item: on_track_disc_setup(
+            app, factory, list_item
+        ),
+    )
+    factory.connect(
+        "bind",
+        lambda factory, list_item: on_track_disc_bind(
+            app, factory, list_item
+        ),
+    )
+    factory.connect(
+        "unbind",
+        lambda factory, list_item: on_track_disc_unbind(
+            app, factory, list_item
+        ),
+    )
+    column = Gtk.ColumnViewColumn.new("Disc", factory)
+    column.set_fixed_width(60)
+    column.set_title("Disc")
+    return column
+
+
+def on_track_disc_setup(
+    app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
+) -> None:
+    label = Gtk.Label(xalign=0.5)
+    label.set_xalign(0.5)
+    label.add_css_class("disc-header-label")
+    container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+    container.set_halign(Gtk.Align.CENTER)
+    container.append(label)
+    list_item.set_child(container)
+    list_item.disc_label = label
+
+
+def on_track_disc_bind(
+    app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
+) -> None:
+    item = list_item.get_item()
+    label = getattr(list_item, "disc_label", None)
+    if label is None or item is None:
+        return
+    if getattr(item, "is_disc_header", False):
+        label.set_label(f"Disc {item.disc_number}")
+        label.add_css_class("disc-header-row-label")
+        label.set_visible(True)
+        return
+    label.remove_css_class("disc-header-row-label")
+    disc_number = getattr(item, "disc_number", 1) or 1
+    if disc_number <= 1:
+        label.set_label("")
+    else:
+        label.set_label(str(disc_number))
+    label.set_visible(True)
+
+
+def on_track_disc_unbind(
+    app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
+) -> None:
+    label = getattr(list_item, "disc_label", None)
+    if label is None:
+        return
+    label.set_label("")
+    label.remove_css_class("disc-header-row-label")
+
+
 def make_track_art_column(app) -> Gtk.ColumnViewColumn:
     factory = Gtk.SignalListItemFactory()
     factory.connect(
@@ -167,31 +243,32 @@ def make_track_art_column(app) -> Gtk.ColumnViewColumn:
 def on_track_playing_setup(
     app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
 ) -> None:
-    icon = Gtk.Image.new_from_icon_name("audio-volume-high-symbolic")
-    icon.set_pixel_size(14)
-    icon.set_visible(False)
-    icon.add_css_class("playing-indicator")
+    bars = make_eq_bars_widget(size=14)
+    bars.set_visible(False)
     container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
     container.set_halign(Gtk.Align.CENTER)
-    container.append(icon)
+    container.append(bars)
     list_item.set_child(container)
-    list_item.playing_icon = icon
+    list_item.playing_bars = bars
 
 
 def on_track_playing_bind(
     app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
 ) -> None:
     item = list_item.get_item()
-    icon = getattr(list_item, "playing_icon", None)
-    if icon is None:
+    bars = getattr(list_item, "playing_bars", None)
+    if bars is None:
+        return
+    if getattr(item, "is_disc_header", False):
+        bars.set_visible(False)
         return
     is_playing = bool(getattr(item, "is_playing", False))
-    icon.set_visible(is_playing)
+    bars.set_visible(is_playing)
     if item is not None:
         handler_id = item.connect(
             "notify::is-playing",
-            lambda item, param, icon=icon: on_track_playing_notify(
-                app, item, param, icon
+            lambda item, param, bars=bars: on_track_playing_notify(
+                app, item, param, bars
             ),
         )
         list_item.playing_handler_id = handler_id
@@ -300,9 +377,9 @@ def _resolve_track_art_url(app, item: TrackRow | None) -> str | None:
 
 
 def on_track_playing_notify(
-    app, item: TrackRow, _param: GObject.ParamSpec, icon: Gtk.Image
+    app, item: TrackRow, _param: GObject.ParamSpec, bars: Gtk.Box
 ) -> None:
-    icon.set_visible(bool(getattr(item, "is_playing", False)))
+    bars.set_visible(bool(getattr(item, "is_playing", False)))
 
 
 def make_track_column(
@@ -381,6 +458,9 @@ def on_track_cell_bind(
         label.set_margin_top(1)
         label.set_margin_bottom(1)
         list_item.set_child(label)
+    if getattr(item, "is_disc_header", False):
+        label.set_label("")
+        return
     value = getattr(item, prop, "")
     if prop == "track_number" and value == 0:
         text = ""
@@ -472,6 +552,15 @@ def on_track_actions_bind(
     app, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem
 ) -> None:
     item = list_item.get_item()
+    container = list_item.get_child()
+    if getattr(item, "is_disc_header", False):
+        if container is not None:
+            container.set_visible(False)
+        for button in getattr(list_item, "action_buttons", []):
+            button.track_item = None
+        return
+    if container is not None:
+        container.set_visible(True)
     remove_enabled = getattr(app, "playlist_detail_is_editable", True)
     for button in getattr(list_item, "action_buttons", []):
         button.track_item = item

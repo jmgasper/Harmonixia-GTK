@@ -112,7 +112,6 @@ async def _fetch_favorites_tracks_async(
 def populate_favorites_tracks(app, tracks: list[dict]) -> None:
     if app.favorites_tracks_store is None:
         return
-    app.favorites_tracks_store.remove_all()
     app.favorites_track_rows = []
     if app.favorites_tracks_selection:
         app.clear_track_selection(app.favorites_tracks_selection)
@@ -138,14 +137,66 @@ def populate_favorites_tracks(app, tracks: list[dict]) -> None:
                 )
         if track_image_url:
             row.image_url = track_image_url
-        app.favorites_tracks_store.append(row)
         app.favorites_track_rows.append(row)
-    if app.favorites_tracks_view and app.favorites_tracks_selection:
-        app.favorites_tracks_view.set_model(app.favorites_tracks_selection)
+    apply_favorites_filter(app)
     if _is_favorites_visible(app):
         app.current_album = _get_favorites_album(app)
         app.current_album_tracks = app.favorites_track_rows
+    _update_favorites_play_button(app)
+
+
+def on_favorites_play_clicked(app) -> None:
+    if not app.server_url or not app.favorites_track_rows:
+        return
+    app.playback_album = _get_favorites_album(app)
+    app.playback_album_tracks = [
+        track_utils.snapshot_track(item, track_utils.get_track_identity)
+        for item in app.favorites_track_rows
+    ]
+    app.start_playback_from_index(0, reset_queue=True)
+
+
+def on_favorites_shuffle_clicked(app) -> None:
+    on_favorites_play_clicked(app)
+    if hasattr(app, "set_shuffle_enabled"):
+        app.set_shuffle_enabled(True)
+
+
+def on_favorites_filter_changed(app, entry) -> None:
+    apply_favorites_filter(app)
+
+
+def apply_favorites_filter(app) -> None:
+    if app.favorites_tracks_store is None:
+        return
+    filter_text = ""
+    filter_entry = getattr(app, "favorites_filter_entry", None)
+    if filter_entry:
+        filter_text = filter_entry.get_text().strip().casefold()
+    app.favorites_tracks_store.remove_all()
+    for row in app.favorites_track_rows:
+        if filter_text:
+            if (
+                filter_text not in row.title.casefold()
+                and filter_text not in row.artist.casefold()
+            ):
+                continue
+        app.favorites_tracks_store.append(row)
+    if app.favorites_tracks_view and app.favorites_tracks_selection:
+        app.favorites_tracks_view.set_model(app.favorites_tracks_selection)
     app.sync_playback_highlight()
+
+
+def _update_favorites_play_button(app) -> None:
+    can_play = bool(app.favorites_track_rows) and bool(app.server_url)
+    play_button = getattr(app, "favorites_play_button", None)
+    if play_button:
+        play_button.set_sensitive(can_play)
+        play_button.set_visible(can_play)
+    shuffle_button = getattr(app, "favorites_shuffle_button", None)
+    if shuffle_button:
+        shuffle_button.set_sensitive(can_play)
+        shuffle_button.set_visible(can_play)
 
 
 def set_favorites_status(
@@ -300,21 +351,15 @@ def _set_track_favorite_state(track: TrackRow, is_favorite: bool) -> None:
 
 
 def _remove_favorite_row(app, track: TrackRow) -> None:
-    store = app.favorites_tracks_store
-    if not store:
-        return
-    for index in range(store.get_n_items()):
-        if store.get_item(index) is track:
-            store.remove(index)
+    for index, row in enumerate(app.favorites_track_rows):
+        if row is track:
+            del app.favorites_track_rows[index]
             break
-    app.favorites_track_rows = [
-        store.get_item(index) for index in range(store.get_n_items())
-    ]
     for index, row in enumerate(app.favorites_track_rows, start=1):
         row.track_number = index
+    apply_favorites_filter(app)
     if _is_favorites_visible(app):
         app.current_album_tracks = app.favorites_track_rows
-        app.sync_playback_highlight()
 
 
 def _get_track_item_id(source: object) -> str | int | None:

@@ -3,13 +3,23 @@
 import json
 import logging
 
+from gi.repository import GLib
+
 from constants import (
     MEDIA_TILE_SIZE_COMPACT,
     MEDIA_TILE_SIZE_LARGE,
     MEDIA_TILE_SIZE_NORMAL,
+    SIDEBAR_WIDTH,
 )
 from music_assistant import client, playback_state
 from ui import playlist_manager
+
+VALID_ALBUM_SORT_ORDERS = (
+    "sort_name",
+    "sort_artist",
+    "year_desc",
+    "timestamp_added_desc",
+)
 
 
 def load_settings(app) -> None:
@@ -98,6 +108,27 @@ def load_settings(app) -> None:
     ):
         album_tile_size = MEDIA_TILE_SIZE_NORMAL
     app.album_tile_size = album_tile_size
+
+    album_sort_order = payload.get("album_sort_order", "sort_name")
+    if not isinstance(album_sort_order, str):
+        album_sort_order = "sort_name"
+    if album_sort_order not in VALID_ALBUM_SORT_ORDERS:
+        album_sort_order = "sort_name"
+    app.album_sort_order = album_sort_order
+
+    search_library_only = payload.get("search_library_only", True)
+    app.search_library_only = bool(search_library_only)
+
+    sidebar_width = payload.get("sidebar_width", SIDEBAR_WIDTH)
+    try:
+        sidebar_width = int(sidebar_width)
+    except (TypeError, ValueError):
+        sidebar_width = SIDEBAR_WIDTH
+    if sidebar_width < 150:
+        sidebar_width = 150
+    elif sidebar_width > 600:
+        sidebar_width = 600
+    app.sidebar_width = sidebar_width
 
 
 def save_settings(app, server_url: str, auth_token: str) -> None:
@@ -271,6 +302,23 @@ def persist_album_density(app, path: str | None = None) -> None:
     ):
         tile_size = MEDIA_TILE_SIZE_NORMAL
     payload["album_tile_size"] = int(tile_size)
+
+    album_sort_order = getattr(app, "album_sort_order", "sort_name")
+    if album_sort_order not in VALID_ALBUM_SORT_ORDERS:
+        album_sort_order = "sort_name"
+    payload["album_sort_order"] = album_sort_order
+
+    payload["search_library_only"] = bool(
+        getattr(app, "search_library_only", True)
+    )
+
+    sidebar_width = getattr(app, "sidebar_width", SIDEBAR_WIDTH)
+    try:
+        sidebar_width = int(sidebar_width)
+    except (TypeError, ValueError):
+        sidebar_width = SIDEBAR_WIDTH
+    payload["sidebar_width"] = sidebar_width
+
     try:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(
@@ -287,6 +335,47 @@ def persist_album_density(app, path: str | None = None) -> None:
             path,
             exc,
         )
+
+
+def reset_ui_preferences(app) -> None:
+    app.album_tile_size = MEDIA_TILE_SIZE_NORMAL
+    app.album_sort_order = "sort_name"
+    app.search_library_only = True
+    app.sidebar_width = SIDEBAR_WIDTH
+    app.persist_album_density()
+
+    for tile_size, button in (getattr(app, "album_density_buttons", {}) or {}).items():
+        button.set_active(tile_size == MEDIA_TILE_SIZE_NORMAL)
+
+    for order_value, button in (getattr(app, "album_sort_buttons", {}) or {}).items():
+        button.set_active(order_value == "sort_name")
+
+    if getattr(app, "search_scope_toggle", None):
+        app.search_scope_toggle.set_active(True)
+
+    if getattr(app, "content_paned", None):
+        app.content_paned.set_position(SIDEBAR_WIDTH)
+
+    app.load_library()
+
+
+def _on_sidebar_width_changed(app, paned, _param) -> None:
+    if app._sidebar_width_persist_id:
+        GLib.source_remove(app._sidebar_width_persist_id)
+        app._sidebar_width_persist_id = None
+
+    def _persist_sidebar_width() -> bool:
+        app._sidebar_width_persist_id = None
+        width = paned.get_position()
+        try:
+            width = int(width)
+        except (TypeError, ValueError):
+            width = SIDEBAR_WIDTH
+        app.sidebar_width = width
+        app.persist_album_density()
+        return False
+
+    app._sidebar_width_persist_id = GLib.timeout_add(400, _persist_sidebar_width)
 
 
 def update_settings_entries(app) -> None:

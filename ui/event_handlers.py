@@ -9,7 +9,7 @@ from gi.repository import Gdk, GLib, Gtk
 
 from music_assistant import playback
 from music_assistant_models.enums import PlaybackState
-from ui import image_loader, track_utils
+from ui import image_loader, toast, track_utils
 
 
 def on_track_action_clicked(app, button: Gtk.Button, menu_button, action: str) -> None:
@@ -229,6 +229,30 @@ def _apply_volume_change(app) -> bool:
     return False
 
 
+def _focused_widget_is_text_input(app) -> bool:
+    window = getattr(app, "window", None)
+    if not window:
+        return False
+    focused = window.get_focus()
+    while focused is not None:
+        if isinstance(focused, (Gtk.Editable, Gtk.Entry, Gtk.TextView)):
+            return True
+        focused = focused.get_parent()
+    return False
+
+
+def on_volume_keyboard_adjust(app, delta: int) -> None:
+    if _focused_widget_is_text_input(app):
+        return
+    if app.volume_slider:
+        current = int(round(app.volume_slider.get_value()))
+    else:
+        current = app.last_volume_value or 0
+    new_volume = max(0, min(100, current + delta))
+    app.set_output_volume(new_volume)
+    toast.show_toast(app, f"Volume: {new_volume}%")
+
+
 def on_volume_drag_begin(
     app, _gesture, _n_press: int, _x: float, _y: float
 ) -> None:
@@ -290,6 +314,26 @@ def on_seek_drag_end(
     if app.mpris_manager:
         app.mpris_manager.emit_mpris_seeked(int(position * 1_000_000))
     app.seek_dragging = False
+
+
+def on_seek_keyboard_adjust(app, delta_seconds: float) -> None:
+    if app.playback_track_info is None or (app.playback_duration or 0) <= 0:
+        return
+    if _focused_widget_is_text_input(app):
+        return
+    new_position = max(
+        0.0,
+        min(
+            float(app.playback_duration),
+            app.playback_elapsed + delta_seconds,
+        ),
+    )
+    app.playback_elapsed = new_position
+    app.playback_last_tick = time.monotonic()
+    app.update_playback_progress_ui()
+    app.send_playback_command("seek", position=int(round(new_position)))
+    if app.mpris_manager:
+        app.mpris_manager.emit_mpris_seeked(int(new_position * 1_000_000))
 
 
 def on_mute_button_clicked(app, _button: Gtk.Button) -> None:

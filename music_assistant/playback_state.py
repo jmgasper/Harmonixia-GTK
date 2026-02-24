@@ -214,6 +214,14 @@ def set_playback_state(app, state: PlaybackState) -> None:
         app.playback_last_tick = time.monotonic()
         app.ensure_playback_timer()
     app.update_play_pause_icon()
+    sidebar_playing_bars = getattr(app, "sidebar_playing_bars", None)
+    sidebar_now_playing_art = getattr(app, "sidebar_now_playing_art", None)
+    if (
+        sidebar_playing_bars
+        and sidebar_now_playing_art
+        and sidebar_now_playing_art.get_visible()
+    ):
+        sidebar_playing_bars.set_visible(state == PlaybackState.PLAYING)
     if app.mpris_manager:
         app.mpris_manager.notify_playback_state_changed()
 
@@ -551,12 +559,18 @@ def update_sidebar_now_playing_art(app) -> None:
         app.sidebar_now_playing_art_url = None
         if getattr(app, "sidebar_queue_controls", None):
             app.sidebar_queue_controls.set_visible(False)
+        if getattr(app, "sidebar_playing_bars", None):
+            app.sidebar_playing_bars.set_visible(False)
         try:
             app.sidebar_now_playing_art.expected_image_url = None
         except Exception:
             pass
         return
     app.sidebar_now_playing_art.set_visible(True)
+    if getattr(app, "sidebar_playing_bars", None):
+        app.sidebar_playing_bars.set_visible(
+            app.playback_state == PlaybackState.PLAYING
+        )
     if getattr(app, "sidebar_queue_controls", None):
         app.sidebar_queue_controls.set_visible(True)
 

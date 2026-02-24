@@ -1,11 +1,15 @@
 {
+  "album_sort_order": "sort_name",
+  "album_tile_size": 150,
   "auth_token": "KS_J2xPAMQJTfC5eReQE0XGMTkHxQzgimE90ILu8D6ss9k34tYi3EUb8LejGRRog",
   "eq_enabled": true,
   "eq_selected_preset": "focal:celestee::autoeq_rtings",
   "output_alsa_device": "",
   "output_backend": "pulse",
   "output_local_output_id": null,
-  "output_player_id": "ma_gtk_44f266db3a",
+  "output_player_id": "ma_gtk_f9704fe620",
   "output_pulse_device": "alsa_output.usb-SMSL_SMSL_USB_AUDIO-00.iec958-stereo",
-  "server_url": "http://192.168.1.29:8095"
+  "search_library_only": true,
+  "server_url": "http://192.168.1.29:8095",
+  "sidebar_width": 215
 }

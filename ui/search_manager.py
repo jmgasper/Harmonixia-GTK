@@ -47,6 +47,8 @@ def on_search_activated(app, entry: Gtk.SearchEntry) -> None:
 
 def on_search_scope_toggled(app, button: Gtk.CheckButton) -> None:
     app.search_library_only = button.get_active()
+    if hasattr(app, "persist_album_density"):
+        app.persist_album_density()
     query = (app.search_query or "").strip()
     if not query and app.search_entry:
         query = app.search_entry.get_text().strip()

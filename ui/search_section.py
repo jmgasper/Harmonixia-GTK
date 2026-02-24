@@ -221,6 +221,7 @@ def build_tracks_section(app) -> tuple[Gtk.Box, Gtk.ScrolledWindow]:
         sort_model_attr="search_tracks_sort_model",
         selection_attr="search_tracks_selection",
         view_attr="search_tracks_view",
+        disc_column_attr="search_tracks_disc_column",
     )
     tracks_scroller = Gtk.ScrolledWindow()
     tracks_scroller.add_css_class("search-tracks-scroller")
