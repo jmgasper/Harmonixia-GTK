@@ -2,7 +2,7 @@ import gi
 gi.require_version('Gdk', '4.0')
 gi.require_version('Gtk', '4.0')
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from music_assistant_models.enums import AlbumType
 
@@ -16,6 +16,13 @@ from ui import image_loader, ui_utils
 from ui.widgets import album_card, loading_spinner
 
 FAVORITES_FILTER_VALUE = "favorites"
+ALBUM_ART_SCROLL_DEBOUNCE_MS = 40
+ALBUM_ART_BACKGROUND_DELAY_MS = 180
+ALBUM_ART_VISIBLE_ROWS = 3
+ALBUM_ART_PRELOAD_ROWS = 2
+ALBUM_ART_MIN_VISIBLE_BATCH = 12
+ALBUM_ART_MIN_BACKGROUND_BATCH = 4
+SHOW_ALBUM_PROVIDER_FILTERS = False
 
 
 def build_album_section(app) -> Gtk.Widget:
@@ -62,6 +69,11 @@ def build_album_section(app) -> Gtk.Widget:
     header_row.append(refresh_button)
 
     section.append(header_row)
+    if SHOW_ALBUM_PROVIDER_FILTERS:
+        section.append(build_provider_filter_bar(app))
+    else:
+        app.album_provider_filter_bar = None
+        app.provider_check_buttons.clear()
 
     status = Gtk.Label(
         label="Configure your Music Assistant server in Settings to load your library."
@@ -90,6 +102,7 @@ def build_album_section(app) -> Gtk.Widget:
     scroller.set_child(content)
     scroller.set_vexpand(True)
     app.albums_scroller = scroller
+    _connect_album_artwork_scroll_handlers(app)
 
     overlay = Gtk.Overlay()
     overlay.set_child(scroller)
@@ -162,6 +175,161 @@ def build_album_type_filter_button(app) -> Gtk.Widget:
     menu_button.set_popover(popover)
     app.album_type_filter_button = menu_button
     return menu_button
+
+
+def build_provider_filter_bar(app) -> Gtk.Widget:
+    bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    bar.add_css_class("provider-filter-bar")
+    app.album_provider_filter_bar = bar
+    _rebuild_provider_chips(app, bar, app.provider_check_buttons)
+    return bar
+
+
+def _provider_display_name(provider_domain: str) -> str:
+    if provider_domain == "filesystem":
+        return "Local"
+    if provider_domain == "tidal":
+        return "TIDAL"
+    return provider_domain.title()
+
+
+def _normalize_provider_domain(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().casefold()
+    return text or None
+
+
+def _read_provider_value(item: object, key: str) -> object:
+    if isinstance(item, dict):
+        return item.get(key)
+    return getattr(item, key, None)
+
+
+def _provider_domains_from_instances(instances: object) -> set[str]:
+    domains: set[str] = set()
+    if isinstance(instances, dict):
+        values = instances.values()
+    elif isinstance(instances, (list, tuple, set)):
+        values = instances
+    else:
+        values = []
+    for instance in values:
+        domain = (
+            _read_provider_value(instance, "domain")
+            or _read_provider_value(instance, "provider_domain")
+            or _read_provider_value(instance, "provider")
+        )
+        normalized = _normalize_provider_domain(domain)
+        if normalized:
+            domains.add(normalized)
+    return domains
+
+
+def _resolve_provider_domains(
+    app,
+    discovered_domains: set[str] | None = None,
+) -> list[str]:
+    resolved: set[str] = set()
+    manifests = getattr(app, "provider_manifests", None) or {}
+    if isinstance(manifests, dict):
+        for domain in manifests.keys():
+            normalized = _normalize_provider_domain(domain)
+            if normalized:
+                resolved.add(normalized)
+    elif isinstance(manifests, (list, tuple, set)):
+        for manifest in manifests:
+            normalized = _normalize_provider_domain(
+                _read_provider_value(manifest, "domain")
+            )
+            if normalized:
+                resolved.add(normalized)
+
+    if not resolved:
+        resolved = _provider_domains_from_instances(
+            getattr(app, "provider_instances", None)
+        )
+
+    if not resolved:
+        for domain in discovered_domains or set():
+            normalized = _normalize_provider_domain(domain)
+            if normalized:
+                resolved.add(normalized)
+
+    return sorted(resolved)
+
+
+def _rebuild_provider_chips(app, bar, check_buttons_dict) -> None:
+    if bar is None:
+        return
+    previous_providers = set(check_buttons_dict.keys())
+    selected_providers = getattr(app, "selected_providers", None)
+    if isinstance(selected_providers, set):
+        prior_selection = set(selected_providers)
+    else:
+        prior_selection = set(selected_providers or [])
+        selected_providers = prior_selection
+        app.selected_providers = selected_providers
+
+    child = bar.get_first_child()
+    while child:
+        next_child = child.get_next_sibling()
+        bar.remove(child)
+        child = next_child
+    check_buttons_dict.clear()
+
+    discovered_providers = set()
+    for album in app.library_albums or []:
+        provider_domain = _pick_album_provider_domain(album)
+        if provider_domain:
+            discovered_providers.add(provider_domain)
+
+    ordered_providers = _resolve_provider_domains(app, discovered_providers)
+    available_providers = set(ordered_providers)
+    if prior_selection:
+        selected_providers.intersection_update(available_providers)
+    elif not previous_providers:
+        selected_providers.clear()
+        selected_providers.update(ordered_providers)
+    else:
+        selected_providers.clear()
+
+    for provider_domain in ordered_providers:
+        button = Gtk.ToggleButton(label=_provider_display_name(provider_domain))
+        button.add_css_class("provider-filter-chip")
+        button.set_active(provider_domain in selected_providers)
+        button.connect(
+            "toggled",
+            lambda toggle_button, domain=provider_domain: (
+                on_provider_filter_toggled(app, toggle_button, domain)
+            ),
+        )
+        bar.append(button)
+        check_buttons_dict[provider_domain] = button
+
+    bar.set_visible(bool(ordered_providers))
+
+
+def on_provider_filter_toggled(
+    app, button: Gtk.ToggleButton, provider_domain: str
+) -> None:
+    if button.get_active():
+        app.selected_providers.add(provider_domain)
+    else:
+        app.selected_providers.discard(provider_domain)
+    apply_album_type_filter(app)
+
+
+def refresh_provider_filter_bar(app) -> None:
+    if not SHOW_ALBUM_PROVIDER_FILTERS:
+        return
+    if app.album_provider_filter_bar is None:
+        return
+    _rebuild_provider_chips(
+        app,
+        app.album_provider_filter_bar,
+        app.provider_check_buttons,
+    )
 
 
 def build_album_density_controls(app) -> Gtk.Widget:
@@ -314,6 +482,7 @@ def on_album_type_filter_toggled(
 
 def set_album_items(app, albums: list) -> None:
     app.library_albums = albums or []
+    refresh_provider_filter_bar(app)
     apply_album_type_filter(app)
     app.refresh_home_sections()
 
@@ -335,6 +504,16 @@ def apply_album_type_filter(app) -> None:
         ]
     else:
         filtered = []
+    should_filter_by_provider = (
+        SHOW_ALBUM_PROVIDER_FILTERS and app.album_provider_filter_bar is not None
+    )
+    selected_providers = set(app.selected_providers or set())
+    if should_filter_by_provider and selected_providers:
+        filtered = [
+            album
+            for album in filtered
+            if _pick_album_provider_domain(album) in selected_providers
+        ]
     if app.albums_flow:
         populate_album_flow(app, filtered)
     update_album_header_counts(app, len(app.library_albums), len(filtered))
@@ -368,6 +547,7 @@ def on_album_activated(
 def populate_album_flow(app, albums: list) -> None:
     if not app.albums_flow:
         return
+    _cancel_album_artwork_schedules(app)
     tile_size = getattr(app, "album_tile_size", MEDIA_TILE_SIZE)
     visible_view = None
     if app.main_stack:
@@ -375,7 +555,6 @@ def populate_album_flow(app, albums: list) -> None:
             visible_view = app.main_stack.get_visible_child_name()
         except Exception:
             visible_view = None
-    load_art = visible_view == "albums" if visible_view is not None else True
     ui_utils.clear_container(app.albums_flow)
     for album in albums:
         image_url = None
@@ -402,7 +581,7 @@ def populate_album_flow(app, albums: list) -> None:
             artist,
             image_url,
             art_size=tile_size,
-            load_art=load_art,
+            load_art=False,
             provider_domain=_pick_album_provider_domain(album_data),
             album_data=album_data,
         )
@@ -414,7 +593,10 @@ def populate_album_flow(app, albums: list) -> None:
         child.set_vexpand(False)
         child.set_size_request(tile_size, -1)
         child.album_data = album_data
+        child.album_image_url = image_url
         app.albums_flow.append(child)
+    if visible_view == "albums":
+        schedule_album_grid_artwork_refresh(app, immediate=True)
 
 
 def _pick_album_provider_domain(album: object) -> str | None:
@@ -447,28 +629,207 @@ def _pick_album_provider_domain(album: object) -> str | None:
     return domains[0]
 
 
+def _get_card_art_picture(card: Gtk.Widget | None) -> Gtk.Picture | None:
+    if card is None:
+        return None
+    first_child = card.get_first_child()
+    if isinstance(first_child, Gtk.Picture):
+        return first_child
+    if isinstance(first_child, Gtk.Overlay):
+        overlay_child = first_child.get_child()
+        if isinstance(overlay_child, Gtk.Picture):
+            return overlay_child
+    return None
+
+
+def _connect_album_artwork_scroll_handlers(app) -> None:
+    scroller = getattr(app, "albums_scroller", None)
+    if not isinstance(scroller, Gtk.ScrolledWindow):
+        return
+    if getattr(app, "_album_artwork_handlers_connected", False):
+        return
+    adjustment = scroller.get_vadjustment()
+    if adjustment is not None:
+        adjustment.connect(
+            "value-changed",
+            lambda _adj: schedule_album_grid_artwork_refresh(app),
+        )
+        adjustment.connect(
+            "changed",
+            lambda _adj: schedule_album_grid_artwork_refresh(app),
+        )
+    scroller.connect(
+        "map",
+        lambda *_args: schedule_album_grid_artwork_refresh(app, immediate=True),
+    )
+    app._album_artwork_handlers_connected = True
+
+
+def _cancel_album_artwork_schedules(app) -> None:
+    refresh_id = getattr(app, "_album_artwork_refresh_id", None)
+    if refresh_id:
+        GLib.source_remove(refresh_id)
+        app._album_artwork_refresh_id = None
+    background_id = getattr(app, "_album_artwork_background_id", None)
+    if background_id:
+        GLib.source_remove(background_id)
+        app._album_artwork_background_id = None
+
+
+def schedule_album_grid_artwork_refresh(
+    app, immediate: bool = False
+) -> None:
+    refresh_id = getattr(app, "_album_artwork_refresh_id", None)
+    if refresh_id:
+        GLib.source_remove(refresh_id)
+    if immediate:
+        app._album_artwork_refresh_id = GLib.idle_add(
+            _run_album_grid_artwork_refresh,
+            app,
+        )
+    else:
+        app._album_artwork_refresh_id = GLib.timeout_add(
+            ALBUM_ART_SCROLL_DEBOUNCE_MS,
+            _run_album_grid_artwork_refresh,
+            app,
+        )
+
+
+def _run_album_grid_artwork_refresh(app) -> bool:
+    app._album_artwork_refresh_id = None
+    ensure_album_grid_artwork(app)
+    return False
+
+
+def _schedule_album_grid_background_refresh(app) -> None:
+    if getattr(app, "_album_artwork_background_id", None):
+        return
+    app._album_artwork_background_id = GLib.timeout_add(
+        ALBUM_ART_BACKGROUND_DELAY_MS,
+        _run_album_grid_background_refresh,
+        app,
+    )
+
+
+def _run_album_grid_background_refresh(app) -> bool:
+    app._album_artwork_background_id = None
+    ensure_album_grid_artwork(app)
+    return False
+
+
+def _is_child_near_viewport(
+    child: Gtk.FlowBoxChild,
+    top: float,
+    bottom: float,
+    fallback_height: int,
+) -> bool:
+    try:
+        allocation = child.get_allocation()
+    except Exception:
+        return True
+    child_top = float(getattr(allocation, "y", 0))
+    child_height = float(getattr(allocation, "height", 0))
+    if child_height <= 0:
+        child_height = float(child.get_allocated_height() or fallback_height)
+    child_bottom = child_top + child_height
+    return child_bottom >= top and child_top <= bottom
+
+
+def _load_album_art_batch(app, targets, tile_size: int, limit: int) -> int:
+    loaded = 0
+    for art, image_url in targets:
+        if loaded >= limit:
+            break
+        expected_url = getattr(art, "expected_image_url", None)
+        if expected_url and expected_url == image_url:
+            continue
+        image_loader.load_album_art_async(
+            art,
+            image_url,
+            tile_size,
+            app.auth_token,
+            app.image_executor,
+            app.get_cache_dir(),
+        )
+        loaded += 1
+    return loaded
+
+
 def ensure_album_grid_artwork(app) -> None:
+    if app.main_stack:
+        try:
+            if app.main_stack.get_visible_child_name() != "albums":
+                _cancel_album_artwork_schedules(app)
+                return
+        except Exception:
+            pass
     flow = app.albums_flow
     if not flow:
         return
     tile_size = getattr(app, "album_tile_size", MEDIA_TILE_SIZE)
+    columns = max(1, flow.get_max_children_per_line() or 1)
+    visible_limit = max(
+        ALBUM_ART_MIN_VISIBLE_BATCH,
+        columns * ALBUM_ART_VISIBLE_ROWS,
+    )
+    background_limit = max(ALBUM_ART_MIN_BACKGROUND_BATCH, columns)
+    preload_pixels = (
+        tile_size + max(0, flow.get_row_spacing())
+    ) * ALBUM_ART_PRELOAD_ROWS
+    view_top = None
+    view_bottom = None
+    scroller = getattr(app, "albums_scroller", None)
+    if isinstance(scroller, Gtk.ScrolledWindow):
+        adjustment = scroller.get_vadjustment()
+        if adjustment is not None:
+            value = float(adjustment.get_value())
+            page_size = float(adjustment.get_page_size())
+            view_top = max(0.0, value - preload_pixels)
+            view_bottom = value + page_size + preload_pixels
+
+    visible_targets = []
+    deferred_targets = []
     child = flow.get_first_child()
     while child:
         album = getattr(child, "album_data", None)
         card = child.get_child()
-        art = card.get_first_child() if card else None
-        if isinstance(art, Gtk.Picture) and art.get_paintable() is None:
+        art = _get_card_art_picture(card)
+        if not isinstance(art, Gtk.Picture) or art.get_paintable() is not None:
+            child = child.get_next_sibling()
+            continue
+        image_url = getattr(child, "album_image_url", None)
+        if not image_url:
             image_url = image_loader.extract_album_image_url(
                 album,
                 app.server_url,
             )
-            if image_url:
-                image_loader.load_album_art_async(
-                    art,
-                    image_url,
-                    tile_size,
-                    app.auth_token,
-                    app.image_executor,
-                    app.get_cache_dir(),
-                )
+            child.album_image_url = image_url
+        if not image_url:
+            child = child.get_next_sibling()
+            continue
+        if view_top is None or view_bottom is None or _is_child_near_viewport(
+            child,
+            view_top,
+            view_bottom,
+            tile_size,
+        ):
+            visible_targets.append((art, image_url))
+        else:
+            deferred_targets.append((art, image_url))
         child = child.get_next_sibling()
+
+    loaded = _load_album_art_batch(
+        app,
+        visible_targets,
+        tile_size,
+        visible_limit,
+    )
+    loaded += _load_album_art_batch(
+        app,
+        deferred_targets,
+        tile_size,
+        background_limit,
+    )
+    remaining = len(visible_targets) + len(deferred_targets) - loaded
+    if remaining > 0:
+        _schedule_album_grid_background_refresh(app)

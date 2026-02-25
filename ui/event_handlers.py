@@ -480,6 +480,7 @@ def on_now_playing_art_context_menu(
 def on_album_card_play_clicked(app, album_data: object) -> None:
     if not album_data:
         return
+    app.playback_album = album_data
     _run_album_card_action(
         app,
         album_data,
@@ -574,8 +575,20 @@ def on_playlist_row_context_action(
 
         playlist_manager.show_delete_playlist_dialog(app, playlist_data)
         return
-    if action in ("Play", "Add to Queue"):
+    if action in ("Play", "Shuffle", "Add to Queue"):
         _run_playlist_context_action(app, playlist_data, action)
+
+
+def on_playlist_card_play_clicked(app, playlist_data: object) -> None:
+    if not playlist_data:
+        return
+    _run_playlist_context_action(app, playlist_data, "Play")
+
+
+def on_playlist_card_shuffle_clicked(app, playlist_data: object) -> None:
+    if not playlist_data:
+        return
+    _run_playlist_context_action(app, playlist_data, "Shuffle")
 
 
 def _run_album_card_action(
@@ -704,8 +717,8 @@ def _playlist_context_action_worker(
         app.output_manager.preferred_player_id if app.output_manager else None
     )
     try:
-        if action == "Play":
-            playback.play_album(
+        if action in ("Play", "Shuffle"):
+            player_id = playback.play_album(
                 app.client_session,
                 app.server_url,
                 app.auth_token,
@@ -713,6 +726,16 @@ def _playlist_context_action_worker(
                 None,
                 preferred_player_id,
             )
+            if player_id and app.output_manager:
+                app.output_manager.preferred_player_id = player_id
+            if action == "Shuffle":
+                playback.set_queue_shuffle(
+                    app.client_session,
+                    app.server_url,
+                    app.auth_token,
+                    True,
+                    player_id or preferred_player_id,
+                )
             _refresh_remote_playback_state(app)
         else:
             playback.add_to_queue(

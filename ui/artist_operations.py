@@ -3,8 +3,9 @@ import threading
 from gi.repository import GLib, Gtk
 
 from constants import DETAIL_ART_SIZE, MEDIA_TILE_SIZE
+from music_assistant import playback
 from music_assistant_client import MusicAssistantClient
-from ui import image_loader, ui_utils
+from ui import image_loader, toast, ui_utils
 from ui import track_utils
 from ui.widgets import album_card
 from ui.widgets.track_row import TrackRow
@@ -52,6 +53,7 @@ def refresh_artist_albums(app) -> None:
     artist = getattr(app, "current_artist", None)
     if not artist:
         return
+    _update_artist_playback_controls(app, artist)
     artist_name = get_artist_name(artist)
     albums = filter_artist_albums(app, artist_name)
     update_artist_albums_header(app, artist_name, len(albums))
@@ -108,6 +110,7 @@ def populate_artist_album_flow(app, albums: list[dict]) -> None:
             art_size=MEDIA_TILE_SIZE,
             album_data=album,
         )
+        _append_artist_album_metadata(card, album)
         child = Gtk.FlowBoxChild()
         child.set_child(card)
         child.set_halign(Gtk.Align.CENTER)
@@ -135,6 +138,104 @@ def on_artist_albums_back(app, _button: Gtk.Button) -> None:
     target_view = app.artist_albums_previous_view or "artists"
     if app.main_stack:
         app.main_stack.set_visible_child_name(target_view)
+
+
+def on_artist_play_clicked(app, _button: Gtk.Button) -> None:
+    _start_artist_playback(app, shuffle=False)
+
+
+def on_artist_shuffle_clicked(app, _button: Gtk.Button) -> None:
+    _start_artist_playback(app, shuffle=True)
+
+
+def _start_artist_playback(app, shuffle: bool) -> None:
+    artist = getattr(app, "current_artist", None)
+    if not artist:
+        toast.show_toast(app, "No artist selected.", is_error=True)
+        return
+    if not app.server_url:
+        toast.show_toast(
+            app,
+            "Connect to a server to use this action.",
+            is_error=True,
+        )
+        return
+    action_label = "Shuffle" if shuffle else "Play"
+    thread = threading.Thread(
+        target=_artist_playback_worker,
+        args=(app, artist, action_label, shuffle),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _artist_playback_worker(
+    app,
+    artist: object,
+    action_label: str,
+    shuffle: bool,
+) -> None:
+    error = ""
+    preferred_player_id = (
+        app.output_manager.preferred_player_id if app.output_manager else None
+    )
+    try:
+        media = _resolve_artist_media(artist)
+        if not media:
+            media = _resolve_artist_track_media(app, artist)
+        if not media:
+            raise RuntimeError("Artist source is unavailable for this action.")
+        player_id = playback.play_album(
+            app.client_session,
+            app.server_url,
+            app.auth_token,
+            media,
+            None,
+            preferred_player_id,
+        )
+        if player_id and app.output_manager:
+            app.output_manager.preferred_player_id = player_id
+        if shuffle:
+            playback.set_queue_shuffle(
+                app.client_session,
+                app.server_url,
+                app.auth_token,
+                True,
+                player_id or preferred_player_id,
+            )
+        _schedule_artist_remote_playback_refresh(app)
+    except Exception as exc:
+        error = str(exc)
+    if error:
+        GLib.idle_add(
+            toast.show_toast,
+            app,
+            f"{action_label} failed: {error}",
+            True,
+        )
+
+
+def _schedule_artist_remote_playback_refresh(app) -> None:
+    GLib.idle_add(app.refresh_remote_playback_state)
+    GLib.timeout_add(200, _deferred_artist_remote_playback_refresh, app)
+    GLib.timeout_add(800, _deferred_artist_remote_playback_refresh, app)
+    GLib.timeout_add(2000, _deferred_artist_remote_playback_refresh, app)
+
+
+def _deferred_artist_remote_playback_refresh(app) -> bool:
+    app.refresh_remote_playback_state()
+    return False
+
+
+def _update_artist_playback_controls(app, artist: object) -> None:
+    normalized_artist = normalize_artist_name(get_artist_name(artist))
+    can_play = bool(app.server_url) and bool(
+        normalized_artist and normalized_artist != "unknown artist"
+    )
+    for attr in ("artist_play_button", "artist_shuffle_button"):
+        button = getattr(app, attr, None)
+        if button:
+            button.set_sensitive(can_play)
 
 
 def get_artist_name(artist: object) -> str:
@@ -219,6 +320,189 @@ def normalize_artist_name(name: str) -> str:
     return (name or "").strip().casefold()
 
 
+def _normalize_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _resolve_artist_media(artist_data: object) -> object | None:
+    if isinstance(artist_data, dict):
+        uri = _normalize_text(artist_data.get("uri"))
+        if uri:
+            return uri
+        item_id = artist_data.get("item_id") or artist_data.get("id")
+        provider = (
+            artist_data.get("provider")
+            or artist_data.get("provider_instance")
+            or artist_data.get("provider_domain")
+        )
+    else:
+        uri = _normalize_text(getattr(artist_data, "uri", None))
+        if uri:
+            return uri
+        item_id = getattr(artist_data, "item_id", None) or getattr(
+            artist_data, "id", None
+        )
+        provider = (
+            getattr(artist_data, "provider", None)
+            or getattr(artist_data, "provider_instance", None)
+            or getattr(artist_data, "provider_domain", None)
+        )
+    item_id_text = _normalize_text(item_id)
+    provider_text = _normalize_text(provider)
+    if item_id_text and provider_text:
+        return {
+            "item_id": item_id_text,
+            "provider": provider_text,
+        }
+    return None
+
+
+def _resolve_artist_track_media(app, artist: object) -> object | None:
+    artist_name = get_artist_name(artist)
+    normalized_artist = normalize_artist_name(artist_name)
+    if not normalized_artist or normalized_artist == "unknown artist":
+        return None
+    provider = _get_artist_provider(artist)
+    try:
+        tracks = app.client_session.run(
+            app.server_url,
+            app.auth_token,
+            app._fetch_artist_top_tracks_async,
+            artist_name,
+            provider,
+        )
+    except Exception:
+        return None
+    uris: list[str] = []
+    for track in tracks or []:
+        if isinstance(track, dict):
+            source_uri = track.get("source_uri") or track.get("uri")
+        else:
+            source_uri = getattr(track, "source_uri", None) or getattr(
+                track, "uri", None
+            )
+        normalized_uri = _normalize_text(source_uri)
+        if normalized_uri:
+            uris.append(normalized_uri)
+    if uris:
+        return uris
+    return playback.build_media_uri_list(tracks)
+
+
+def _coerce_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_year(value: object) -> int | None:
+    if value is None:
+        return None
+    if hasattr(value, "year"):
+        year = _coerce_int(getattr(value, "year", None))
+    elif isinstance(value, str):
+        text = value.strip()
+        if len(text) >= 4 and text[:4].isdigit():
+            year = _coerce_int(text[:4])
+        else:
+            year = _coerce_int(text)
+    else:
+        year = _coerce_int(value)
+    if year is None or year < 1000 or year > 3000:
+        return None
+    return year
+
+
+def _pick_album_field(album: object, names: tuple[str, ...]) -> object | None:
+    for name in names:
+        if isinstance(album, dict):
+            value = album.get(name)
+        else:
+            value = getattr(album, name, None)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _extract_artist_album_year(album: object) -> int | None:
+    year = _coerce_year(
+        _pick_album_field(album, ("year", "release_year", "album_year"))
+    )
+    if year:
+        return year
+    metadata = _pick_album_field(album, ("metadata",))
+    if isinstance(metadata, dict):
+        release_date = metadata.get("release_date") or metadata.get("year")
+    else:
+        release_date = getattr(metadata, "release_date", None) or getattr(
+            metadata, "year", None
+        )
+    metadata_year = _coerce_year(release_date)
+    if metadata_year:
+        return metadata_year
+    return _coerce_year(_pick_album_field(album, ("release_date",)))
+
+
+def _normalize_album_type(value: object) -> str:
+    raw = getattr(value, "value", value)
+    text = str(raw).strip().casefold() if raw is not None else ""
+    if text.startswith("albumtype."):
+        return text.split(".", 1)[1]
+    return text
+
+
+def _is_live_album(album: object) -> bool:
+    if _normalize_album_type(_pick_album_field(album, ("album_type", "type"))) == "live":
+        return True
+    metadata = _pick_album_field(album, ("metadata",))
+    if metadata is None:
+        return False
+    if isinstance(metadata, dict):
+        nested_type = metadata.get("album_type") or metadata.get("type")
+    else:
+        nested_type = getattr(metadata, "album_type", None) or getattr(
+            metadata, "type", None
+        )
+    return _normalize_album_type(nested_type) == "live"
+
+
+def _append_artist_album_metadata(card: Gtk.Widget, album: object) -> None:
+    year = _extract_artist_album_year(album)
+    is_live = _is_live_album(album)
+    if year is None and not is_live:
+        return
+    meta_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    meta_row.add_css_class("artist-album-meta-row")
+    meta_row.set_halign(Gtk.Align.CENTER)
+    if year is not None:
+        year_label = Gtk.Label(label=str(year), xalign=0.5)
+        year_label.add_css_class("artist-album-year")
+        meta_row.append(year_label)
+    if is_live:
+        live_label = Gtk.Label(label="Live")
+        live_label.add_css_class("artist-album-live-pill")
+        meta_row.append(live_label)
+    card.append(meta_row)
+
+
 def _start_artist_top_tracks_refresh(
     app,
     artist: object,
@@ -241,8 +525,10 @@ def _start_artist_top_tracks_refresh(
 def _start_artist_bio_refresh(app, artist: object) -> None:
     if getattr(app, "artist_detail_art", None):
         app.artist_detail_art.set_paintable(None)
-    if getattr(app, "artist_bio_expander", None):
-        app.artist_bio_expander.set_visible(False)
+    bio_label = getattr(app, "artist_bio_label", None)
+    if bio_label:
+        bio_label.set_label("")
+        bio_label.set_visible(False)
     if not app.server_url:
         bio = _extract_artist_bio(artist)
         image_url = _extract_artist_image_url(artist, app.server_url or "")
@@ -394,13 +680,14 @@ def on_artist_bio_loaded(
         get_artist_name(getattr(app, "current_artist", None))
     ):
         return
-    if bio and getattr(app, "artist_bio_text_view", None):
-        buffer = app.artist_bio_text_view.get_buffer()
-        buffer.set_text(bio, -1)
-        if getattr(app, "artist_bio_expander", None):
-            app.artist_bio_expander.set_visible(True)
-    elif getattr(app, "artist_bio_expander", None):
-        app.artist_bio_expander.set_visible(False)
+    bio_label = getattr(app, "artist_bio_label", None)
+    if bio_label:
+        if bio:
+            bio_label.set_label(bio)
+            bio_label.set_visible(True)
+        else:
+            bio_label.set_label("")
+            bio_label.set_visible(False)
     if image_url and getattr(app, "artist_detail_art", None):
         image_loader.load_album_art_async(
             app.artist_detail_art,

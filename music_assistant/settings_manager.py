@@ -85,6 +85,10 @@ def load_settings(app) -> None:
         output_alsa_device = ""
     app.output_alsa_device = output_alsa_device
 
+    output_bitperfect = payload.get("output_bitperfect", False)
+    output_bitperfect = bool(output_bitperfect)
+    app.output_bitperfect = output_bitperfect
+
     eq_enabled = payload.get("eq_enabled", False)
     if not isinstance(eq_enabled, bool):
         eq_enabled = False
@@ -214,6 +218,7 @@ def persist_output_selection(app, path: str | None = None) -> None:
     payload["output_backend"] = app.output_backend or ""
     payload["output_pulse_device"] = app.output_pulse_device or ""
     payload["output_alsa_device"] = app.output_alsa_device or ""
+    payload["output_bitperfect"] = bool(getattr(app, "output_bitperfect", False))
     try:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(
@@ -400,6 +405,14 @@ def update_settings_entries(app) -> None:
         app.settings_pulse_device_entry.set_text(app.output_pulse_device or "")
     if app.settings_alsa_device_entry is not None:
         app.settings_alsa_device_entry.set_text(app.output_alsa_device or "")
+    if app.settings_bitperfect_switch is not None:
+        app.suppress_bitperfect_sync = True
+        try:
+            app.settings_bitperfect_switch.set_active(
+                bool(getattr(app, "output_bitperfect", False))
+            )
+        finally:
+            app.suppress_bitperfect_sync = False
 
 
 def connect_to_server(

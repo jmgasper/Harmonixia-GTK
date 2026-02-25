@@ -64,6 +64,7 @@ class AudioPipeline:
         self.eq_enabled = False
         self.eq_num_bands = 10
         self.eq_band_configs: list[dict] = []
+        self._bitperfect: bool = False
         self._logger = logging.getLogger(__name__)
 
     @staticmethod
@@ -105,6 +106,7 @@ class AudioPipeline:
             self.stream_format
             and self.pipeline
             and self.appsrc
+            and not self._bitperfect
             and self.stream_format == format_info
         ):
             self.pipeline.set_state(Gst.State.PLAYING)
@@ -260,6 +262,58 @@ class AudioPipeline:
         self.set_muted(muted)
         self._apply_eq_config()
 
+    def create_bitperfect_pipeline(
+        self,
+        format_info: PCMFormat,
+        hw_path: str,
+    ) -> None:
+        if Gst is None:
+            return
+        self.destroy_pipeline()
+        Gst.init(None)
+        pipeline = Gst.Pipeline.new("sendspin-bitperfect-pipeline")
+        appsrc = Gst.ElementFactory.make("appsrc", "bitperfect-src")
+        capsfilter = Gst.ElementFactory.make("capsfilter", "bitperfect-caps")
+        sink = Gst.ElementFactory.make("alsasink", "bitperfect-sink")
+        if not pipeline or not appsrc or not capsfilter or not sink:
+            self._logger.warning(
+                "Failed to initialize bit-perfect GStreamer pipeline."
+            )
+            return
+        caps = Gst.Caps.from_string(self.build_pcm_caps(format_info))
+        appsrc.set_property("caps", caps)
+        appsrc.set_property("format", Gst.Format.TIME)
+        appsrc.set_property("is-live", True)
+        appsrc.set_property("do-timestamp", False)
+        appsrc.set_property("block", True)
+        output_caps = Gst.Caps.from_string(self.build_pcm_caps(format_info))
+        capsfilter.set_property("caps", output_caps)
+        sink.set_property("device", hw_path)
+        pipeline.add(appsrc)
+        pipeline.add(capsfilter)
+        pipeline.add(sink)
+        appsrc.link(capsfilter)
+        capsfilter.link(sink)
+        self._attach_bus_watch(pipeline)
+        pipeline.set_state(Gst.State.PLAYING)
+        self.pipeline = pipeline
+        self.appsrc = appsrc
+        self.stream_format = format_info
+        self.stream_start_ts = None
+        self.last_pts_ns = None
+        self._bitperfect = True
+        message = "Bit-perfect pipeline ready: %s Hz/%s-bit/%s ch -> %s"
+        args = (
+            format_info.sample_rate,
+            format_info.bit_depth,
+            format_info.channels,
+            hw_path,
+        )
+        if os.getenv("SENDSPIN_DEBUG"):
+            self._logger.info(message, *args)
+        else:
+            self._logger.debug(message, *args)
+
     def destroy_pipeline(self) -> None:
         if not self.pipeline:
             return
@@ -268,6 +322,7 @@ class AudioPipeline:
         self.appsrc = None
         self.volume_element = None
         self.eq_element = None
+        self._bitperfect = False
         self.stream_format = None
         self.stream_start_ts = None
         self.last_pts_ns = None
@@ -472,11 +527,21 @@ class AudioPipeline:
                     self._logger.debug("GStreamer debug: %s", debug)
 
     def set_volume(self, volume: float) -> None:
+        if self._bitperfect:
+            self._logger.warning(
+                "set_volume ignored: bit-perfect pipeline is active"
+            )
+            return
         volume = max(0.0, min(1.0, float(volume)))
         self.volume = volume
         self._apply_volume()
 
     def set_muted(self, muted: bool) -> None:
+        if self._bitperfect:
+            self._logger.warning(
+                "set_muted ignored: bit-perfect pipeline is active"
+            )
+            return
         self.muted = bool(muted)
         self._apply_volume()
 
@@ -540,6 +605,11 @@ class AudioPipeline:
         self._apply_eq_config()
 
     def _apply_eq_config(self) -> None:
+        if self._bitperfect:
+            self._logger.warning(
+                "_apply_eq_config ignored: bit-perfect pipeline is active"
+            )
+            return
         if not self.eq_element:
             return
         self.eq_element.set_property("num-bands", self.eq_num_bands)

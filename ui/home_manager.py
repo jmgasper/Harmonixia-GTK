@@ -314,6 +314,19 @@ def ensure_home_artwork(app) -> None:
         _ensure_flow_artwork(app, flow)
 
 
+def _get_card_art_picture(card: Gtk.Widget | None) -> Gtk.Picture | None:
+    if card is None:
+        return None
+    first_child = card.get_first_child()
+    if isinstance(first_child, Gtk.Picture):
+        return first_child
+    if isinstance(first_child, Gtk.Overlay):
+        overlay_child = first_child.get_child()
+        if isinstance(overlay_child, Gtk.Picture):
+            return overlay_child
+    return None
+
+
 def _ensure_flow_artwork(app, flow: Gtk.FlowBox | None) -> None:
     if flow is None:
         return
@@ -323,7 +336,7 @@ def _ensure_flow_artwork(app, flow: Gtk.FlowBox | None) -> None:
         album = getattr(child, "album_data", None)
         recommendation = getattr(child, "recommendation_item", None)
         card = child.get_child()
-        art = card.get_first_child() if card else None
+        art = _get_card_art_picture(card)
         if isinstance(art, Gtk.Picture) and art.get_paintable() is None:
             image_url = None
             if album:
@@ -356,20 +369,34 @@ async def _fetch_recently_played_albums_async(
 ) -> list[dict]:
     items = await client.music.recently_played(
         limit=HOME_LIST_LIMIT,
-        media_types=[MediaType.ALBUM],
+        media_types=[MediaType.ALBUM, MediaType.PLAYLIST],
     )
     albums: list[dict] = []
     for item in items:
-        data = library._serialize_album(client, item)
-        if not data.get("image_url") and not data.get("artists"):
-            item_id, provider = _get_album_identity(item)
-            if item_id and provider:
-                try:
-                    item = await client.music.get_album(item_id, provider)
-                except Exception:
-                    item = None
-                if item is not None:
-                    data = library._serialize_album(client, item)
+        media_type = _get_media_type_value(item)
+        if media_type == MediaType.PLAYLIST.value:
+            data = library._serialize_playlist(item)
+            data["media_type"] = MediaType.PLAYLIST.value
+            image_url = image_loader.resolve_media_item_image_url(
+                client,
+                item,
+                app.server_url,
+            )
+            if image_url:
+                data["image_url"] = image_url
+        else:
+            data = library._serialize_album(client, item)
+            data["media_type"] = MediaType.ALBUM.value
+            if not data.get("image_url") and not data.get("artists"):
+                item_id, provider = _get_album_identity(item)
+                if item_id and provider:
+                    try:
+                        item = await client.music.get_album(item_id, provider)
+                    except Exception:
+                        item = None
+                    if item is not None:
+                        data = library._serialize_album(client, item)
+                        data["media_type"] = MediaType.ALBUM.value
         albums.append(data)
         if len(albums) >= HOME_LIST_LIMIT:
             break
@@ -686,7 +713,7 @@ def on_main_stack_visible_child_changed(app, stack, _param) -> None:
     if visible == "home":
         ensure_home_artwork(app)
     elif visible == "albums":
-        album_grid.ensure_album_grid_artwork(app)
+        album_grid.schedule_album_grid_artwork_refresh(app, immediate=True)
     elif visible == "favorites":
         app.load_favorites()
     elif visible == "queue":

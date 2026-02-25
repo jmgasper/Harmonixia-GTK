@@ -9,23 +9,6 @@ def build_sidebar(app) -> Gtk.Widget:
 
     sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
-    home_list = Gtk.ListBox()
-    home_list.add_css_class("sidebar-list")
-    home_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-    home_list.connect(
-        "row-selected",
-        lambda listbox, row: on_library_selected(app, listbox, row),
-    )
-    home_row = make_sidebar_row("Home", "go-home-symbolic")
-    home_row.add_css_class("sidebar-primary")
-    home_row.view_name = "home"
-    home_list.append(home_row)
-    home_list.select_row(home_row)
-    home_list.set_margin_top(8)
-    home_list.set_margin_bottom(8)
-    sidebar.append(home_list)
-    app.home_nav_list = home_list
-
     search_entry = Gtk.SearchEntry()
     search_entry.add_css_class("sidebar-search")
     search_entry.set_placeholder_text("Search Library")
@@ -37,20 +20,17 @@ def build_sidebar(app) -> Gtk.Widget:
     sidebar.append(search_entry)
     app.search_entry = search_entry
 
-    library_label = Gtk.Label(label="Library")
-    library_label.add_css_class("section-title")
-    library_label.set_xalign(0)
-    sidebar.append(library_label)
-
-    library_list = Gtk.ListBox()
-    library_list.add_css_class("sidebar-list")
-    library_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-    library_list.connect(
+    nav_list = Gtk.ListBox()
+    nav_list.add_css_class("sidebar-list")
+    nav_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    nav_list.connect(
         "row-selected",
         lambda listbox, row: on_library_selected(app, listbox, row),
     )
-    app.library_list = library_list
-    library_rows = []
+    home_row = make_sidebar_row("Home", "go-home-symbolic")
+    home_row.view_name = "home"
+    nav_list.append(home_row)
+    nav_list.append(make_sidebar_section_header("Library"))
     for item, view_name, icon_name in [
         ("Albums", "albums", "media-optical-symbolic"),
         ("Artists", "artists", "avatar-default-symbolic"),
@@ -58,9 +38,12 @@ def build_sidebar(app) -> Gtk.Widget:
     ]:
         row = make_sidebar_row(item, icon_name)
         row.view_name = view_name
-        library_list.append(row)
-        library_rows.append(row)
-    sidebar.append(library_list)
+        nav_list.append(row)
+    nav_list.select_row(home_row)
+    nav_list.set_margin_top(8)
+    sidebar.append(nav_list)
+    app.home_nav_list = nav_list
+    app.library_list = nav_list
 
     playlists_header = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -403,12 +386,9 @@ def on_library_selected(
     if not row or not app.main_stack:
         return
     view_name = getattr(row, "view_name", None)
-    if view_name:
-        app.main_stack.set_visible_child_name(view_name)
-    if listbox is app.library_list and app.home_nav_list:
-        app.home_nav_list.unselect_all()
-    elif listbox is app.home_nav_list and app.library_list:
-        app.library_list.unselect_all()
+    if not view_name:
+        return
+    app.main_stack.set_visible_child_name(view_name)
     if app.playlists_list:
         app.playlists_list.unselect_all()
 
@@ -423,11 +403,24 @@ def make_sidebar_row(
     label.set_margin_bottom(2)
     if icon_name:
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        box.append(Gtk.Image.new_from_icon_name(icon_name))
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.set_pixel_size(18)
+        box.append(icon)
         box.append(label)
         row.set_child(box)
     else:
         row.set_child(label)
+    return row
+
+
+def make_sidebar_section_header(text: str) -> Gtk.ListBoxRow:
+    row = Gtk.ListBoxRow()
+    row.set_selectable(False)
+    row.set_activatable(False)
+    row.add_css_class("sidebar-section-header-row")
+    label = Gtk.Label(label=text, xalign=0)
+    label.add_css_class("sidebar-section-label")
+    row.set_child(label)
     return row
 
 

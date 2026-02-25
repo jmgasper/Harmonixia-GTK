@@ -116,6 +116,8 @@ def build_search_section(app) -> Gtk.Widget:
     container.append(scope_box)
     app.search_scope_toggle = scope_toggle
 
+    container.append(build_search_provider_filter_bar(app))
+
     status = Gtk.Label()
     status.add_css_class("status-label")
     status.set_xalign(0)
@@ -167,6 +169,14 @@ def build_search_section(app) -> Gtk.Widget:
 
     app.search_results_view = scroller
     return scroller
+
+
+def build_search_provider_filter_bar(app) -> Gtk.Widget:
+    bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    bar.add_css_class("provider-filter-bar")
+    bar.set_visible(False)
+    app.search_provider_filter_bar = bar
+    return bar
 
 
 def build_flow_section(title: str) -> tuple[Gtk.Box, Gtk.FlowBox]:

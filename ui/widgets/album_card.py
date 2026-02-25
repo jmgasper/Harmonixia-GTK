@@ -151,8 +151,10 @@ def make_playlist_card(
     image_url: str | None = None,
     art_size: int = MEDIA_TILE_SIZE,
     load_art: bool = True,
+    playlist_data: object | None = None,
+    enable_playlist_actions: bool = False,
 ) -> Gtk.Widget:
-    return make_album_card(
+    card = make_album_card(
         app,
         title,
         "",
@@ -161,8 +163,69 @@ def make_playlist_card(
         card_class="playlist-card",
         show_artist=False,
         load_art=load_art,
+        album_data=playlist_data,
         enable_album_actions=False,
     )
+    if not enable_playlist_actions:
+        return card
+    art_overlay = card.get_first_child()
+    if not isinstance(art_overlay, Gtk.Overlay):
+        return card
+
+    play_button = Gtk.Button()
+    play_button.add_css_class("album-card-play-overlay")
+    play_button.set_halign(Gtk.Align.CENTER)
+    play_button.set_valign(Gtk.Align.CENTER)
+    play_button.set_tooltip_text("Play playlist")
+    play_button.set_child(
+        Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
+    )
+    play_button.connect(
+        "clicked",
+        lambda _button: (
+            app.on_playlist_card_play_clicked(card.album_data)
+            if hasattr(app, "on_playlist_card_play_clicked")
+            else None
+        ),
+    )
+
+    shuffle_button = Gtk.Button()
+    shuffle_button.add_css_class("album-card-play-overlay")
+    shuffle_button.set_halign(Gtk.Align.CENTER)
+    shuffle_button.set_valign(Gtk.Align.CENTER)
+    shuffle_button.set_tooltip_text("Play playlist shuffled")
+    shuffle_button.set_child(
+        Gtk.Image.new_from_icon_name("media-playlist-shuffle-symbolic")
+    )
+    shuffle_button.connect(
+        "clicked",
+        lambda _button: (
+            app.on_playlist_card_shuffle_clicked(card.album_data)
+            if hasattr(app, "on_playlist_card_shuffle_clicked")
+            else None
+        ),
+    )
+
+    controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    controls.set_halign(Gtk.Align.CENTER)
+    controls.set_valign(Gtk.Align.CENTER)
+    controls.append(play_button)
+    controls.append(shuffle_button)
+    art_overlay.add_overlay(controls)
+
+    motion = Gtk.EventControllerMotion.new()
+
+    def _set_hovered(active: bool) -> None:
+        for button in (play_button, shuffle_button):
+            if active:
+                button.add_css_class("album-art-hovered")
+            else:
+                button.remove_css_class("album-art-hovered")
+
+    motion.connect("enter", lambda *_args: _set_hovered(True))
+    motion.connect("leave", lambda *_args: _set_hovered(False))
+    art_overlay.add_controller(motion)
+    return card
 
 
 def format_provider_badge(provider_domain: str) -> str:

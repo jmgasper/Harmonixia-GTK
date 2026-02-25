@@ -1,7 +1,8 @@
 from gi.repository import GLib, Gtk
 
 from constants import HOME_ALBUM_ART_SIZE, HOME_GRID_COLUMNS
-from ui import track_table, ui_utils
+from music_assistant_models.enums import MediaType
+from ui import image_loader, track_table, ui_utils
 from ui.widgets import album_card
 
 
@@ -21,7 +22,7 @@ def build_home_section(app) -> Gtk.Widget:
         played_spinner,
     ) = build_home_album_list(
         "Recently Played",
-        "Play an album to see it here.",
+        "Play an album or playlist to see it here.",
     )
     played_list.album_app = app
     app.home_recently_played_list = played_list
@@ -244,11 +245,30 @@ def _trim_items_to_full_rows(items: list, columns: int) -> list:
     return items[: total - remainder]
 
 
+def _is_playlist_media_item(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    media_type = item.get("media_type")
+    return media_type == MediaType.PLAYLIST.value
+
+
 def on_home_album_activated(app, _flowbox: Gtk.FlowBox, child: Gtk.FlowBoxChild) -> None:
     if not app:
         return
     album = getattr(child, "album_data", None)
     if not album:
+        return
+    if _is_playlist_media_item(album):
+        if not app.main_stack:
+            return
+        app.show_playlist_detail(album)
+        app.main_stack.set_visible_child_name("playlist-detail")
+        if app.home_nav_list:
+            app.home_nav_list.unselect_all()
+        if app.library_list:
+            app.library_list.unselect_all()
+        if app.playlists_list:
+            app.playlists_list.unselect_all()
         return
     app.album_detail_previous_view = "home"
     app.show_album_detail(album)
@@ -271,7 +291,26 @@ def populate_home_album_list(
     valid_albums = _trim_items_to_full_rows(valid_albums, columns)
     ui_utils.clear_container(listbox)
     for album in valid_albums:
-        card = album_card.make_home_album_card(app, album, art_size=art_size)
+        if _is_playlist_media_item(album):
+            title = album.get("name") or "Untitled Playlist"
+            image_url = image_loader.extract_media_image_url(
+                album,
+                app.server_url,
+            )
+            card = album_card.make_playlist_card(
+                app,
+                title,
+                image_url,
+                art_size=art_size,
+                playlist_data=album,
+                enable_playlist_actions=True,
+            )
+        else:
+            card = album_card.make_home_album_card(
+                app,
+                album,
+                art_size=art_size,
+            )
         child = Gtk.FlowBoxChild()
         child.set_child(card)
         child.set_halign(Gtk.Align.CENTER)

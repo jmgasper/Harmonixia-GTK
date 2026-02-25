@@ -157,14 +157,30 @@ class OutputManager:
             if backend == "alsa" and alsa_path:
                 suffix_parts.append(f"ALSA {alsa_path}")
             if output.get("is_usb") and "usb" not in name.casefold(): suffix_parts.append("USB DAC")
+            if output.get("is_bitperfect_capable"):
+                suffix_parts.append("Bit-Perfect")
             suffix_parts.append("This Computer"); suffix = ", ".join(suffix_parts); display_name = f"{name} ({suffix})" if suffix else name
-            self.add_output_row(player.player_id, display_name, local_output_id=output["id"], local_output_name=output["name"])
+            self.add_output_row(
+                player.player_id,
+                display_name,
+                local_output_id=output["id"],
+                local_output_name=output["name"],
+                is_bitperfect_capable=output.get("is_bitperfect_capable", False),
+                bitperfect_formats=output.get("bitperfect_formats"),
+            )
 
-    def add_output_row(self, player_id, display_name, local_output_id=None, local_output_name=None):
+    def add_output_row(self, player_id, display_name, local_output_id=None, local_output_name=None, is_bitperfect_capable=False, bitperfect_formats=None):
         key = (player_id, local_output_id)
         if key in self.output_target_rows:
             return
-        output = {"player_id": player_id, "display_name": display_name, "local_output_id": local_output_id, "local_output_name": local_output_name}
+        output = {
+            "player_id": player_id,
+            "display_name": display_name,
+            "local_output_id": local_output_id,
+            "local_output_name": local_output_name,
+            "is_bitperfect_capable": bool(is_bitperfect_capable),
+            "bitperfect_formats": bitperfect_formats,
+        }
         self.output_targets.append(output); self.output_target_rows[key] = output
 
     def pick_default_output_key(self):
@@ -289,6 +305,146 @@ class OutputManager:
             "alsa_path": alsa_path,
         }
 
+    def query_usb_dac_native_formats(self, hw_path):
+        match = re.match(r"hw:(\d+),(\d+)", hw_path or "")
+        if not match:
+            return []
+        card_index = int(match.group(1))
+        device_index = int(match.group(2))
+        candidate_rates = (44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000)
+        alsa_format_to_depth = {
+            2: 16,   # SND_PCM_FORMAT_S16_LE
+            6: 24,   # SND_PCM_FORMAT_S24_LE (padded)
+            10: 32,  # SND_PCM_FORMAT_S32_LE
+            32: 24,  # SND_PCM_FORMAT_S24_3LE (packed)
+        }
+        alsa = _load_alsa_lib()
+        if alsa:
+            try:
+                alsa.snd_pcm_open.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+                alsa.snd_pcm_open.restype = ctypes.c_int
+                alsa.snd_pcm_close.argtypes = [ctypes.c_void_p]
+                alsa.snd_pcm_close.restype = ctypes.c_int
+                alsa.snd_pcm_hw_params_malloc.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+                alsa.snd_pcm_hw_params_malloc.restype = ctypes.c_int
+                alsa.snd_pcm_hw_params_free.argtypes = [ctypes.c_void_p]
+                alsa.snd_pcm_hw_params_free.restype = None
+                alsa.snd_pcm_hw_params_any.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+                alsa.snd_pcm_hw_params_any.restype = ctypes.c_int
+                alsa.snd_pcm_hw_params_test_format.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+                alsa.snd_pcm_hw_params_test_format.restype = ctypes.c_int
+                alsa.snd_pcm_hw_params_test_rate.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_int]
+                alsa.snd_pcm_hw_params_test_rate.restype = ctypes.c_int
+
+                snd_pcm_stream_playback = 0
+                snd_pcm_nonblock = 1
+                supported = set()
+                with _suppress_alsa_errors():
+                    pcm_handle = ctypes.c_void_p()
+                    open_result = alsa.snd_pcm_open(
+                        ctypes.byref(pcm_handle),
+                        hw_path.encode("utf-8"),
+                        snd_pcm_stream_playback,
+                        snd_pcm_nonblock,
+                    )
+                    if open_result == 0 and pcm_handle:
+                        params_handle = ctypes.c_void_p()
+                        params_allocated = False
+                        try:
+                            if alsa.snd_pcm_hw_params_malloc(ctypes.byref(params_handle)) == 0 and params_handle:
+                                params_allocated = True
+                                if alsa.snd_pcm_hw_params_any(pcm_handle, params_handle) == 0:
+                                    for alsa_fmt_enum, depth in alsa_format_to_depth.items():
+                                        if alsa.snd_pcm_hw_params_test_format(pcm_handle, params_handle, alsa_fmt_enum) != 0:
+                                            continue
+                                        for sample_rate in candidate_rates:
+                                            if alsa.snd_pcm_hw_params_test_rate(pcm_handle, params_handle, sample_rate, 0) == 0:
+                                                supported.add((sample_rate, depth))
+                        finally:
+                            if params_allocated and params_handle:
+                                alsa.snd_pcm_hw_params_free(params_handle)
+                            alsa.snd_pcm_close(pcm_handle)
+                if supported:
+                    result = sorted(supported, key=lambda item: (item[0], item[1]))
+                    self._logger.debug("Detected ALSA native formats for %s via ctypes: %s", hw_path, result)
+                    return result
+            except Exception as exc:
+                self._logger.warning("Failed ALSA ctypes format probe for %s: %s", hw_path, exc)
+
+        proc_hw_params = f"/proc/asound/card{card_index}/pcm{device_index}p/sub0/hw_params"
+        proc_info = f"/proc/asound/card{card_index}/pcm{device_index}p/info"
+        try:
+            with open(proc_hw_params, "r", encoding="utf-8") as handle:
+                hw_params_content = handle.read().strip()
+        except OSError:
+            try:
+                with open(proc_info, "r", encoding="utf-8") as handle:
+                    _ = handle.read(1)
+                self._logger.debug("ALSA format info unavailable for %s: %s", hw_path, proc_hw_params)
+            except OSError:
+                pass
+            return []
+
+        if hw_params_content.casefold().startswith("closed"):
+            try:
+                with open(proc_info, "r", encoding="utf-8") as handle:
+                    _ = handle.read(1)
+                self._logger.debug("ALSA format info unavailable for %s: %s is closed", hw_path, proc_hw_params)
+            except OSError:
+                pass
+            return []
+
+        format_to_depth = {
+            "S16_LE": 16,
+            "S16_BE": 16,
+            "S24_LE": 24,
+            "S24_BE": 24,
+            "S24_3LE": 24,
+            "S24_3BE": 24,
+            "S32_LE": 32,
+            "S32_BE": 32,
+        }
+        try:
+            depths = set()
+            rates = set()
+            for line in hw_params_content.splitlines():
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                key = key.strip().upper()
+                value = value.strip()
+                if key == "FORMAT":
+                    for token in value.split():
+                        depth = format_to_depth.get(token)
+                        if depth:
+                            depths.add(depth)
+                    continue
+                if key != "RATE":
+                    continue
+                if value.startswith("[") and value.endswith("]"):
+                    parts = value[1:-1].split()
+                    if len(parts) >= 2:
+                        try:
+                            min_rate = int(parts[0])
+                            max_rate = int(parts[1])
+                        except ValueError:
+                            continue
+                        for sample_rate in candidate_rates:
+                            if min_rate <= sample_rate <= max_rate:
+                                rates.add(sample_rate)
+                    continue
+                for token in value.split():
+                    try:
+                        rates.add(int(token))
+                    except ValueError:
+                        continue
+            result = sorted({(rate, depth) for rate in rates for depth in depths}, key=lambda item: (item[0], item[1]))
+            self._logger.debug("Detected ALSA native formats for %s via /proc: %s", hw_path, result)
+            return result
+        except Exception as exc:
+            self._logger.warning("Failed /proc ALSA format probe for %s: %s", hw_path, exc)
+            return []
+
     def list_alsa_outputs(self):
         cards = self.read_alsa_cards()
         playback_devices = self.read_alsa_playback_devices()
@@ -297,8 +453,11 @@ class OutputManager:
             device_index = playback_devices[card_index]
             card_name = cards.get(card_index) or f"Card {card_index}"
             alsa_path = f"plughw:{card_index},{device_index}"
+            alsa_hw_path = f"hw:{card_index},{device_index}"
             output_id = f"alsa:{alsa_path}"
             is_usb = "usb" in card_name.casefold()
+            bitperfect_formats = self.query_usb_dac_native_formats(alsa_hw_path)
+            is_bitperfect_capable = is_usb and bool(alsa_hw_path)
             outputs.append(
                 {
                     "id": output_id,
@@ -307,7 +466,9 @@ class OutputManager:
                     "is_usb": is_usb,
                     "is_pipewire": False,
                     "alsa_path": alsa_path,
-                    "alsa_hw_path": f"hw:{card_index},{device_index}",
+                    "alsa_hw_path": alsa_hw_path,
+                    "bitperfect_formats": bitperfect_formats,
+                    "is_bitperfect_capable": is_bitperfect_capable,
                 }
             )
         return outputs
@@ -554,6 +715,26 @@ class OutputManager:
                 continue
             return cleaned
         return ""
+
+    def create_bitperfect_sink_for_output(self, output_id: str | None) -> str | None:
+        if not output_id:
+            return None
+        output = self.local_audio_outputs_by_id.get(output_id)
+        if not output or not output.get("is_bitperfect_capable"):
+            return None
+        hw_path = output.get("alsa_hw_path")
+        if not isinstance(hw_path, str):
+            return None
+        hw_path = hw_path.strip()
+        if not hw_path:
+            return None
+        if os.getenv("SENDSPIN_DEBUG"):
+            self._logger.debug(
+                "Using bit-perfect ALSA hw path=%s for output %s",
+                hw_path,
+                output_id,
+            )
+        return hw_path
 
     def create_sink_for_output(self, output_id):
         if Gst is None or not output_id: return None

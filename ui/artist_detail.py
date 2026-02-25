@@ -44,27 +44,56 @@ def build_artist_albums_section(app) -> Gtk.Widget:
     title.set_ellipsize(Pango.EllipsizeMode.END)
     title.set_xalign(0)
 
-    bio_expander = Gtk.Expander(label="Biography")
-    bio_expander.add_css_class("artist-bio-expander")
-    bio_expander.set_expanded(False)
-    bio_expander.set_visible(False)
+    controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    controls_row.add_css_class("artist-detail-controls")
+    controls_row.set_halign(Gtk.Align.START)
 
-    bio_scroll = Gtk.ScrolledWindow()
-    bio_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-    bio_scroll.set_max_content_height(140)
+    play_button = Gtk.Button()
+    play_button.add_css_class("suggested-action")
+    play_button.add_css_class("detail-play")
+    play_button.set_halign(Gtk.Align.START)
+    play_button.set_sensitive(False)
+    play_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
+    play_icon.set_pixel_size(18)
+    play_label = Gtk.Label(label="Play")
+    play_label.add_css_class("detail-action-label")
+    play_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    play_content.append(play_icon)
+    play_content.append(play_label)
+    play_button.set_child(play_content)
+    play_button.connect("clicked", app.on_artist_play_clicked)
 
-    bio_text_view = Gtk.TextView()
-    bio_text_view.set_editable(False)
-    bio_text_view.set_cursor_visible(False)
-    bio_text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-    bio_text_view.set_left_margin(4)
-    bio_text_view.set_right_margin(4)
-    bio_text_view.add_css_class("artist-bio-text")
-    bio_scroll.set_child(bio_text_view)
-    bio_expander.set_child(bio_scroll)
+    shuffle_icon_name = app.pick_icon_name(
+        ["media-playlist-shuffle-symbolic", "media-playlist-shuffle"]
+    )
+    shuffle_button = Gtk.Button()
+    shuffle_button.add_css_class("detail-play")
+    shuffle_button.set_halign(Gtk.Align.START)
+    shuffle_button.set_sensitive(False)
+    shuffle_icon = Gtk.Image.new_from_icon_name(shuffle_icon_name)
+    shuffle_icon.set_pixel_size(18)
+    shuffle_label = Gtk.Label(label="Shuffle")
+    shuffle_label.add_css_class("detail-action-label")
+    shuffle_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    shuffle_content.append(shuffle_icon)
+    shuffle_content.append(shuffle_label)
+    shuffle_button.set_child(shuffle_content)
+    shuffle_button.connect("clicked", app.on_artist_shuffle_clicked)
+
+    controls_row.append(play_button)
+    controls_row.append(shuffle_button)
+
+    bio_label = Gtk.Label(label="", xalign=0)
+    bio_label.add_css_class("artist-bio-text")
+    bio_label.add_css_class("artist-bio-label")
+    bio_label.set_wrap(True)
+    bio_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    bio_label.set_selectable(True)
+    bio_label.set_visible(False)
 
     artist_info.append(title)
-    artist_info.append(bio_expander)
+    artist_info.append(controls_row)
+    artist_info.append(bio_label)
 
     artist_header.append(artist_art)
     artist_header.append(artist_info)
@@ -141,8 +170,9 @@ def build_artist_albums_section(app) -> Gtk.Widget:
     app.artist_albums_view = scroller
     app.artist_albums_title = title
     app.artist_detail_art = artist_art
-    app.artist_bio_expander = bio_expander
-    app.artist_bio_text_view = bio_text_view
+    app.artist_bio_label = bio_label
+    app.artist_play_button = play_button
+    app.artist_shuffle_button = shuffle_button
     app.artist_albums_header = albums_header
     app.artist_albums_status_label = status
     app.artist_albums_flow = flow

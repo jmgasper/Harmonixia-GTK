@@ -12,6 +12,7 @@ from music_assistant_client.exceptions import (
 )
 from music_assistant_models.enums import MediaType
 from music_assistant_models.errors import AuthenticationFailed, AuthenticationRequired
+from ui.album_grid import _pick_album_provider_domain, _resolve_provider_domains
 from ui import image_loader, track_utils, ui_utils
 from ui.widgets import album_card
 from ui.widgets.track_row import TrackRow
@@ -189,7 +190,10 @@ async def _fetch_search_results_async(
         )
         playlists = await _serialize_playlists(client, search_results.playlists)
         albums = await _serialize_albums(client, search_results.albums)
-        artists = [library._serialize_artist(item) for item in search_results.artists]
+        artists = [
+            library._serialize_artist(client, item)
+            for item in search_results.artists
+        ]
         tracks = await _serialize_tracks(client, search_results.tracks)
         return {
             "playlists": playlists,
@@ -225,7 +229,10 @@ async def _fetch_search_results_async(
         return {
             "playlists": await _serialize_playlists(client, playlists),
             "albums": [library._serialize_album(client, album) for album in albums],
-            "artists": [library._serialize_artist(artist) for artist in artists],
+            "artists": [
+                library._serialize_artist(client, artist)
+                for artist in artists
+            ],
             "tracks": await _serialize_tracks(client, tracks),
         }
 
@@ -246,6 +253,8 @@ def on_search_results_loaded(
         app.clear_search_results()
         app.set_search_status(error, is_error=True)
         return
+    app._raw_search_results = results
+    app._rebuild_search_provider_chips()
     playlists = results.get("playlists") or []
     albums = results.get("albums") or []
     artists = results.get("artists") or []
@@ -255,10 +264,7 @@ def on_search_results_loaded(
         "is_search": True,
         "query": query,
     }
-    app.populate_search_playlists(playlists)
-    app.populate_search_albums(albums)
-    app.populate_search_artists(artists)
-    app.populate_search_tracks(tracks)
+    app.reapply_search_provider_filter()
 
     total = len(playlists) + len(albums) + len(artists) + len(tracks)
     if total:
@@ -279,6 +285,7 @@ def set_search_status(app, message: str, is_error: bool = False) -> None:
 
 
 def clear_search_results(app) -> None:
+    app._raw_search_results = None
     if app.search_playlists_flow:
         ui_utils.clear_container(app.search_playlists_flow)
     if app.search_albums_flow:
@@ -300,7 +307,96 @@ def clear_search_results(app) -> None:
     ):
         if section:
             section.set_visible(False)
+    if app.search_provider_filter_bar:
+        app.search_provider_filter_bar.set_visible(False)
+    app.search_provider_check_buttons.clear()
     app.set_search_status("")
+
+
+def reapply_search_provider_filter(app) -> None:
+    if app._raw_search_results is None:
+        return
+    playlists = app._raw_search_results.get("playlists") or []
+    albums = app._raw_search_results.get("albums") or []
+    artists = app._raw_search_results.get("artists") or []
+    tracks = app._raw_search_results.get("tracks") or []
+    selected_providers = set(app.selected_providers or set())
+    if selected_providers:
+        filtered_albums = [
+            album
+            for album in albums
+            if _pick_album_provider_domain(album) in selected_providers
+        ]
+        filtered_tracks = [
+            track
+            for track in tracks
+            if _pick_search_track_provider_domain(track) in selected_providers
+        ]
+    else:
+        filtered_albums = albums
+        filtered_tracks = tracks
+    app.populate_search_playlists(playlists)
+    app.populate_search_albums(filtered_albums)
+    app.populate_search_artists(artists)
+    app.populate_search_tracks(filtered_tracks)
+
+
+def on_search_provider_filter_toggled(
+    app, button: Gtk.ToggleButton, provider_domain: str
+) -> None:
+    if button.get_active():
+        app.selected_providers.add(provider_domain)
+    else:
+        app.selected_providers.discard(provider_domain)
+    app._rebuild_search_provider_chips()
+    app.reapply_search_provider_filter()
+
+
+def _rebuild_search_provider_chips(app) -> None:
+    bar = app.search_provider_filter_bar
+    if bar is None:
+        return
+    child = bar.get_first_child()
+    while child:
+        next_child = child.get_next_sibling()
+        bar.remove(child)
+        child = next_child
+    app.search_provider_check_buttons.clear()
+
+    raw_results = app._raw_search_results or {}
+    albums = raw_results.get("albums") or []
+    tracks = raw_results.get("tracks") or []
+    discovered_providers = set()
+    for album in albums:
+        provider_domain = _pick_album_provider_domain(album)
+        if provider_domain:
+            discovered_providers.add(provider_domain)
+    for track in tracks:
+        provider_domain = _pick_search_track_provider_domain(track)
+        if provider_domain:
+            discovered_providers.add(provider_domain)
+
+    ordered_providers = _resolve_provider_domains(app, discovered_providers)
+    if not ordered_providers:
+        bar.set_visible(False)
+        return
+
+    if not app.selected_providers:
+        app.selected_providers.update(ordered_providers)
+
+    for provider_domain in ordered_providers:
+        button = Gtk.ToggleButton(label=_provider_display_name(provider_domain))
+        button.add_css_class("provider-filter-chip")
+        button.set_active(provider_domain in app.selected_providers)
+        button.connect(
+            "toggled",
+            lambda toggle_button, domain=provider_domain: (
+                on_search_provider_filter_toggled(app, toggle_button, domain)
+            ),
+        )
+        bar.append(button)
+        app.search_provider_check_buttons[provider_domain] = button
+    bar.set_visible(True)
 
 
 def populate_search_playlists(app, playlists: list[dict]) -> None:
@@ -466,6 +562,25 @@ def on_search_playlist_activated(
         app.library_list.unselect_all()
     if app.playlists_list:
         app.playlists_list.unselect_all()
+
+
+def _provider_display_name(provider_domain: str) -> str:
+    if provider_domain == "filesystem":
+        return "Local"
+    if provider_domain == "tidal":
+        return "TIDAL"
+    return provider_domain.title()
+
+
+def _pick_search_track_provider_domain(track: object) -> str | None:
+    if isinstance(track, dict):
+        mappings = track.get("provider_mappings") or []
+        if not mappings:
+            source = track.get("source")
+            mappings = getattr(source, "provider_mappings", None) or []
+    else:
+        mappings = getattr(track, "provider_mappings", None) or []
+    return _pick_album_provider_domain({"provider_mappings": mappings})
 
 
 def _empty_results() -> dict:

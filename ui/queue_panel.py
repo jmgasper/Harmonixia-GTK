@@ -35,6 +35,42 @@ def build_queue_panel(app) -> Gtk.Widget:
     clear_button.connect("clicked", app.on_queue_clear_clicked)
     header_row.append(clear_button)
 
+    transfer_button = Gtk.MenuButton(label="Transfer to…")
+    transfer_button.add_css_class("queue-transfer-button")
+
+    transfer_popover = Gtk.Popover()
+    transfer_popover.set_has_arrow(False)
+    transfer_popover.set_position(Gtk.PositionType.BOTTOM)
+    transfer_popover.connect("map", app.on_queue_transfer_popover_mapped)
+
+    transfer_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    transfer_container.set_margin_start(6)
+    transfer_container.set_margin_end(6)
+    transfer_container.set_margin_top(6)
+    transfer_container.set_margin_bottom(6)
+
+    transfer_title = Gtk.Label(label="Transfer queue to", xalign=0)
+    transfer_title.add_css_class("output-title")
+    transfer_container.append(transfer_title)
+
+    transfer_list = Gtk.ListBox()
+    transfer_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    transfer_list.set_activate_on_single_click(True)
+    transfer_list.add_css_class("output-list")
+    transfer_list.connect("row-activated", app.on_queue_transfer_row_activated)
+    transfer_container.append(transfer_list)
+
+    transfer_status = Gtk.Label()
+    transfer_status.add_css_class("status-label")
+    transfer_status.set_xalign(0)
+    transfer_status.set_wrap(True)
+    transfer_status.set_visible(False)
+    transfer_container.append(transfer_status)
+
+    transfer_popover.set_child(transfer_container)
+    transfer_button.set_popover(transfer_popover)
+    header_row.append(transfer_button)
+
     close_button = Gtk.Button()
     close_button.add_css_class("flat")
     close_button.set_tooltip_text("Close queue")
@@ -75,6 +111,9 @@ def build_queue_panel(app) -> Gtk.Widget:
     app.queue_panel_view = container
     app.queue_status_label = status
     app.queue_clear_button = clear_button
+    app.queue_transfer_button = transfer_button
+    app.queue_transfer_list = transfer_list
+    app.queue_transfer_status = transfer_status
     return container
 
 
@@ -117,6 +156,72 @@ def on_queue_clear_clicked(app, _button: Gtk.Button | None = None) -> None:
         args=(
             app,
             app.output_manager.preferred_player_id if app.output_manager else None,
+        ),
+        daemon=True,
+    )
+    thread.start()
+
+
+def on_queue_transfer_popover_mapped(app, _popover: Gtk.Popover) -> None:
+    listbox = getattr(app, "queue_transfer_list", None)
+    if listbox is None:
+        return
+    ui_utils.clear_container(listbox)
+    outputs = app.output_manager.get_output_targets() if app.output_manager else []
+    preferred_player_id = (
+        app.output_manager.preferred_player_id if app.output_manager else None
+    )
+    rows_added = 0
+    for output in outputs:
+        player_id = output.get("player_id")
+        if not player_id or player_id == preferred_player_id:
+            continue
+        row = Gtk.ListBoxRow()
+        row.player_id = player_id
+        label = Gtk.Label(label=output.get("display_name") or "", xalign=0)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_margin_top(2)
+        label.set_margin_bottom(2)
+        row.set_child(label)
+        listbox.append(row)
+        rows_added += 1
+    status = getattr(app, "queue_transfer_status", None)
+    if status is not None:
+        if rows_added == 0:
+            status.set_label("No other players available.")
+            status.set_visible(True)
+        else:
+            status.set_label("")
+            status.set_visible(False)
+
+
+def on_queue_transfer_row_activated(
+    app,
+    _listbox: Gtk.ListBox,
+    row: Gtk.ListBoxRow | None,
+) -> None:
+    if row is None:
+        return
+    if app.queue_transfer_button:
+        popover = app.queue_transfer_button.get_popover()
+        if popover:
+            popover.popdown()
+    app.on_queue_transfer_clicked(getattr(row, "player_id", None))
+
+
+def on_queue_transfer_clicked(app, target_player_id: str | None) -> None:
+    if not app.server_url or not target_player_id:
+        return
+    if getattr(app, "queue_transferring", False):
+        return
+    app.queue_transferring = True
+    _set_queue_status(app, "Transferring queue...")
+    thread = threading.Thread(
+        target=_queue_transfer_worker,
+        args=(
+            app,
+            app.output_manager.preferred_player_id if app.output_manager else None,
+            target_player_id,
         ),
         daemon=True,
     )
@@ -295,6 +400,26 @@ def _clear_queue_worker(app, preferred_player_id: str | None) -> None:
     GLib.idle_add(_on_queue_cleared, app, error)
 
 
+def _queue_transfer_worker(
+    app,
+    source_player_id: str | None,
+    target_player_id: str | None,
+) -> None:
+    error = ""
+    try:
+        playback.transfer_queue(
+            app.client_session,
+            app.server_url,
+            app.auth_token,
+            source_player_id,
+            target_player_id,
+            auto_play=None,
+        )
+    except Exception as exc:
+        error = str(exc)
+    GLib.idle_add(_on_queue_transferred, app, error)
+
+
 def _on_queue_cleared(app, error: str) -> bool:
     app.queue_clearing = False
     _set_queue_clear_button_sensitive(app, True)
@@ -304,6 +429,16 @@ def _on_queue_cleared(app, error: str) -> bool:
     else:
         app.queue_operation_error = ""
     app.refresh_queue_panel()
+    return False
+
+
+def _on_queue_transferred(app, error: str) -> bool:
+    app.queue_transferring = False
+    if error:
+        logging.getLogger(__name__).warning("Unable to transfer queue: %s", error)
+        _set_queue_status(app, f"Transfer failed: {error}")
+    else:
+        _set_queue_status(app, "Queue transferred.")
     return False
 
 

@@ -76,15 +76,54 @@ def _apply_outputs_changed(app) -> None:
             unique_outputs[index] = selected
             seen[selected_key] = selected
     for output in unique_outputs:
+        player_id = output["player_id"]
+        local_output_id = output["local_output_id"]
         row = Gtk.ListBoxRow()
-        row.player_id = output["player_id"]
-        row.local_output_id = output["local_output_id"]
+        row.player_id = player_id
+        row.local_output_id = local_output_id
         row.local_output_name = output["local_output_name"]
+        is_bitperfect_capable = bool(output.get("is_bitperfect_capable"))
+        bitperfect_formats = output.get("bitperfect_formats") or []
+        if is_bitperfect_capable:
+            if bitperfect_formats:
+                max_rate = max(rate for rate, _depth in bitperfect_formats)
+                max_depth = max(depth for _rate, depth in bitperfect_formats)
+                max_rate_khz = max_rate / 1000
+                rate_text = (
+                    f"{max_rate_khz:.0f}" if max_rate % 1000 == 0 else f"{max_rate_khz:.1f}"
+                )
+                row.set_tooltip_text(
+                    f"USB DAC · Bit-Perfect · up to {rate_text} kHz / {max_depth}-bit"
+                )
+            else:
+                row.set_tooltip_text("USB DAC · Bit-Perfect")
+        row_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row_content.set_hexpand(True)
         label = Gtk.Label(label=output["display_name"], xalign=0)
+        label.set_hexpand(True)
         label.set_ellipsize(Pango.EllipsizeMode.END)
         label.set_margin_top(2)
         label.set_margin_bottom(2)
-        row.set_child(label)
+        row_content.append(label)
+        transfer_button = Gtk.Button()
+        transfer_button.add_css_class("flat")
+        transfer_button.add_css_class("queue-transfer-button")
+        transfer_button.set_tooltip_text("Transfer queue here")
+        transfer_button.set_child(
+            Gtk.Image.new_from_icon_name("media-skip-forward-symbolic")
+        )
+        transfer_button.connect(
+            "clicked",
+            lambda _btn, pid=player_id: app.on_queue_transfer_clicked(pid),
+        )
+        is_selected = bool(
+            selected
+            and player_id == selected.get("player_id")
+            and local_output_id == selected.get("local_output_id")
+        )
+        transfer_button.set_visible(not is_selected)
+        row_content.append(transfer_button)
+        row.set_child(row_content)
         row.display_name = output["display_name"]
         app.output_targets_list.append(row)
         app.output_target_rows[(row.player_id, row.local_output_id)] = row
@@ -130,6 +169,14 @@ def _apply_output_selected(app) -> None:
     )
     if hasattr(app, "refresh_playback_settings"):
         app.refresh_playback_settings()
+    if getattr(app, "output_bitperfect", False):
+        local_output = app.output_manager.get_preferred_local_output()
+        if local_output is None or not local_output.get("is_bitperfect_capable"):
+            logging.getLogger(__name__).warning(
+                "Bit-perfect mode is enabled but selected output '%s' does not support it; "
+                "falling back to standard pipeline.",
+                local_output["name"] if local_output else "System Default",
+            )
 
 
 def on_output_loading_changed(app) -> None:
@@ -231,8 +278,17 @@ def _sendspin_pipeline_teardown(app) -> bool:
 def on_sendspin_stream_start(app, format_info: sendspin.PCMFormat) -> None:
     app.cancel_sendspin_pipeline_teardown()
     app.audio_pipeline.reset_stream_timing()
-    sink = None
     local_output = app.output_manager.get_preferred_local_output()
+    if (
+        getattr(app, "output_bitperfect", False)
+        and local_output is not None
+        and local_output.get("is_bitperfect_capable")
+    ):
+        hw_path = app.output_manager.create_bitperfect_sink_for_output(local_output["id"])
+        if hw_path is not None:
+            app.audio_pipeline.create_bitperfect_pipeline(format_info, hw_path)
+            return
+    sink = None
     if local_output:
         sink = app.output_manager.create_sink_for_output(local_output["id"])
     if sink is None:
@@ -272,18 +328,40 @@ def on_sendspin_audio_chunk(
     if getattr(app, "playback_pending", False):
         GLib.idle_add(app.mark_playback_started)
     if not app.audio_pipeline.is_active():
-        sink = None
         local_output = app.output_manager.get_preferred_local_output()
-        if local_output:
-            sink = app.output_manager.create_sink_for_output(local_output["id"])
-        if sink is None:
-            sink = app.output_manager.create_default_sink()
-        app.audio_pipeline.create_pipeline(
-            format_info,
-            sink,
-            app.sendspin_manager.volume,
-            app.sendspin_manager.muted,
+        bitperfect_ready = (
+            getattr(app, "output_bitperfect", False)
+            and local_output is not None
+            and local_output.get("is_bitperfect_capable")
         )
+        if bitperfect_ready:
+            hw_path = app.output_manager.create_bitperfect_sink_for_output(local_output["id"])
+            if hw_path is not None:
+                app.audio_pipeline.create_bitperfect_pipeline(format_info, hw_path)
+            else:
+                sink = None
+                if local_output:
+                    sink = app.output_manager.create_sink_for_output(local_output["id"])
+                if sink is None:
+                    sink = app.output_manager.create_default_sink()
+                app.audio_pipeline.create_pipeline(
+                    format_info,
+                    sink,
+                    app.sendspin_manager.volume,
+                    app.sendspin_manager.muted,
+                )
+        else:
+            sink = None
+            if local_output:
+                sink = app.output_manager.create_sink_for_output(local_output["id"])
+            if sink is None:
+                sink = app.output_manager.create_default_sink()
+            app.audio_pipeline.create_pipeline(
+                format_info,
+                sink,
+                app.sendspin_manager.volume,
+                app.sendspin_manager.muted,
+            )
     app.audio_pipeline.push_audio(timestamp_us, payload, format_info)
 
 

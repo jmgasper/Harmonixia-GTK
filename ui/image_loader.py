@@ -155,7 +155,7 @@ def iter_image_candidates(value: object):
             if isinstance(candidate, str) and candidate.strip():
                 yield candidate.strip()
         return
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple, set)):
         for item in value:
             yield from iter_image_candidates(item)
 

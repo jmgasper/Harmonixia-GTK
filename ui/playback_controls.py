@@ -40,7 +40,7 @@ def build_controls(app) -> Gtk.Widget:
 
     art_thumb = Gtk.Picture()
     art_thumb.add_css_class("now-playing-art-thumb")
-    art_thumb.set_size_request(48, 48)
+    art_thumb.set_size_request(56, 56)
     art_thumb.set_halign(Gtk.Align.START)
     art_thumb.set_valign(Gtk.Align.CENTER)
     art_thumb.set_can_shrink(True)

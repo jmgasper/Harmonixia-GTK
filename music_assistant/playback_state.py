@@ -651,12 +651,22 @@ def update_now_playing_art_thumb(app) -> None:
 
 def _resolve_now_playing_image_url(app) -> str | None:
     image_url = None
+    album_image_url = _resolve_playback_album_image_url(app)
+    library_album_image_url = _resolve_library_album_image_url(app)
     if app.playback_track_info:
-        image_url = app.playback_track_info.get("image_url")
-    if image_url:
-        resolved = image_loader.resolve_image_url(image_url, app.server_url)
-        if resolved:
-            image_url = resolved
+        candidate = app.playback_track_info.get("image_url")
+        if isinstance(candidate, str):
+            candidate = candidate.strip() or None
+        else:
+            candidate = None
+        if candidate:
+            image_url = image_loader.resolve_image_url(
+                candidate, app.server_url
+            )
+    if not image_url and album_image_url:
+        image_url = album_image_url
+    if not image_url and library_album_image_url:
+        image_url = library_album_image_url
     if not image_url and app.playback_track_info:
         source = app.playback_track_info.get("source")
         if source:
@@ -664,11 +674,10 @@ def _resolve_now_playing_image_url(app) -> str | None:
                 source,
                 app.server_url,
             )
-    if not image_url and app.playback_album:
-        image_url = image_loader.extract_media_image_url(
-            app.playback_album,
-            app.server_url,
-        )
+    if not image_url and album_image_url:
+        image_url = album_image_url
+    if not image_url and library_album_image_url:
+        image_url = library_album_image_url
     return image_url
 
 
@@ -1464,6 +1473,105 @@ def _extract_album_name(item: object | None) -> str:
     return ""
 
 
+def _album_names_match(left: str, right: str) -> bool:
+    left_value = _normalize_album_label(left)
+    right_value = _normalize_album_label(right)
+    if not left_value or not right_value:
+        return False
+    left_key = left_value.casefold()
+    right_key = right_value.casefold()
+    return (
+        left_key == right_key
+        or left_key in right_key
+        or right_key in left_key
+    )
+
+
+def _resolve_playback_album_image_url(app) -> str | None:
+    playback_album = getattr(app, "playback_album", None)
+    if not playback_album:
+        return None
+    album_image_url = image_loader.extract_media_image_url(
+        playback_album,
+        app.server_url,
+    )
+    if not album_image_url:
+        return None
+    track_info = (
+        app.playback_track_info
+        if isinstance(app.playback_track_info, dict)
+        else {}
+    )
+    track_album = _normalize_album_label(track_info.get("album"))
+    playback_album_name = _normalize_album_label(
+        _get_attr(playback_album, "name")
+        or _get_attr(playback_album, "title")
+    )
+    if track_album and playback_album_name:
+        if not _album_names_match(track_album, playback_album_name):
+            return None
+    return album_image_url
+
+
+def _resolve_library_album_image_url(
+    app,
+    album_name: str | None = None,
+    artist_name: str | None = None,
+) -> str | None:
+    track_info = (
+        app.playback_track_info
+        if isinstance(app.playback_track_info, dict)
+        else {}
+    )
+    target_album = _normalize_album_label(album_name or track_info.get("album"))
+    if not target_album:
+        return None
+    target_artist = artist_name
+    if target_artist is None:
+        target_artist = track_info.get("artist")
+    if isinstance(target_artist, str):
+        target_artist = target_artist.strip() or None
+    else:
+        target_artist = None
+    albums = getattr(app, "library_albums", None) or []
+    fallback_image_url = None
+    for album in albums:
+        album_title = _normalize_album_label(
+            _get_attr(album, "name") or _get_attr(album, "title")
+        )
+        if not album_title or not _album_names_match(album_title, target_album):
+            continue
+        image_url = image_loader.extract_media_image_url(album, app.server_url)
+        if not image_url:
+            continue
+        if not target_artist:
+            return image_url
+        artists = _get_attr(album, "artists")
+        artist_names: list[str] = []
+        if isinstance(artists, str):
+            artist_names = [artists]
+        elif isinstance(artists, (list, tuple, set)):
+            for item in artists:
+                if isinstance(item, str):
+                    value = item
+                else:
+                    value = _get_attr(item, "name") or _get_attr(
+                        item, "sort_name"
+                    )
+                if isinstance(value, str):
+                    normalized = value.strip()
+                    if normalized:
+                        artist_names.append(normalized)
+        if any(
+            name.casefold() == target_artist.casefold()
+            for name in artist_names
+        ):
+            return image_url
+        if fallback_image_url is None:
+            fallback_image_url = image_url
+    return fallback_image_url
+
+
 def _build_track_info_from_queue_item(
     app, queue_item: object
 ) -> dict | None:
@@ -1550,16 +1658,67 @@ def _build_track_info_from_queue_item(
         source_uri = source_uri.strip() or None
     else:
         source_uri = None
-    image_url = (
-        _get_attr(media_item, "image_url")
-        or _get_attr(media_item, "cover_image_url")
-        or _get_attr(media_item, "image")
-        or _get_attr(media_item, "artwork")
+    image_url = image_loader.extract_media_image_url(
+        media_item,
+        app.server_url,
     )
-    if isinstance(image_url, str):
-        image_url = image_url.strip() or None
-    else:
-        image_url = None
+    playback_album_image_url = _resolve_playback_album_image_url(app)
+    queue_album_name = _normalize_album_label(
+        _extract_album_name(media_item) or _extract_album_name(queue_item)
+    )
+    playback_album_name = _normalize_album_label(
+        _get_attr(getattr(app, "playback_album", None), "name")
+        or _get_attr(getattr(app, "playback_album", None), "title")
+    )
+    if (
+        playback_album_image_url
+        and queue_album_name
+        and playback_album_name
+        and _album_names_match(queue_album_name, playback_album_name)
+    ):
+        image_url = playback_album_image_url
+    if not image_url:
+        image_url = image_loader.extract_media_image_url(
+            queue_item,
+            app.server_url,
+        )
+    if not image_url and playback_album_image_url:
+        image_url = playback_album_image_url
+    if not image_url:
+        image_url = _resolve_library_album_image_url(
+            app,
+            album_name=album,
+            artist_name=artist,
+        )
+    if not image_url:
+        previous_track_info = (
+            app.playback_track_info
+            if isinstance(app.playback_track_info, dict)
+            else {}
+        )
+        previous_queue_item_id = previous_track_info.get("queue_item_id")
+        previous_source_uri = previous_track_info.get("source_uri")
+        previous_image_url = previous_track_info.get("image_url")
+        is_same_queue_item = bool(
+            queue_item_id
+            and previous_queue_item_id
+            and str(queue_item_id) == str(previous_queue_item_id)
+        )
+        is_same_source = bool(
+            source_uri
+            and previous_source_uri
+            and str(source_uri) == str(previous_source_uri)
+        )
+        if (
+            (is_same_queue_item or is_same_source)
+            and isinstance(previous_image_url, str)
+        ):
+            previous_candidate = previous_image_url.strip() or None
+            if previous_candidate:
+                image_url = image_loader.resolve_image_url(
+                    previous_candidate,
+                    app.server_url,
+                )
     quality = track_utils.describe_track_quality(
         media_item, track_utils.format_sample_rate
     )

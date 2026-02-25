@@ -14,7 +14,7 @@ separator {
   background-color: #1a1f28;
   background-image: linear-gradient(#212734, #171b22);
   border-bottom: 1px solid #2a303a;
-  padding: 8px 12px;
+  padding: 10px 16px;
 }
 
 .control-bar button.flat {
@@ -75,7 +75,8 @@ separator {
 }
 
 .control-bar .now-playing {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .control-bar .now-playing-provider {
@@ -98,7 +99,7 @@ separator {
 
 .control-bar .now-playing-artist {
   color: #9aa4b2;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -196,7 +197,11 @@ scale slider {
 }
 
 .sidebar .section-title {
-  font-size: 17px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
 }
 
 .sidebar-section-header {
@@ -210,10 +215,11 @@ scale slider {
 .sidebar-search {
   background-color: #1a212b;
   border: 1px solid #2a303a;
-  border-radius: 6px;
+  border-radius: 999px;
   color: #e6e9ef;
-  font-size: 12px;
-  margin: 4px 10px;
+  font-size: 13px;
+  margin: 8px 12px 6px;
+  padding: 6px 14px;
 }
 
 .sidebar-search:focus {
@@ -241,8 +247,13 @@ scale slider {
   color: #cbd5e1;
 }
 
-.sidebar-list row.sidebar-primary label {
-  font-size: 17px;
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+  padding: 10px 12px 4px;
 }
 
 .sidebar-action {
@@ -282,9 +293,9 @@ scale slider {
 .now-playing-art-thumb {
   background-color: #1b212b;
   border: 1px solid #2a303a;
-  border-radius: 4px;
-  min-width: 48px;
-  min-height: 48px;
+  border-radius: 6px;
+  min-width: 56px;
+  min-height: 56px;
 }
 
 .sidebar-now-playing-art:hover {
@@ -329,6 +340,34 @@ scale slider {
   opacity: 0.7;
 }
 
+/* Queue transfer button - consistent with .queue-toggle */
+button.queue-transfer-button {
+  background: transparent;
+  border: 1px solid #2a303a;
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+}
+
+button.queue-transfer-button image {
+  color: #cbd5e1;
+}
+
+button.queue-transfer-button:hover {
+  background-color: #1f2530;
+  border-color: #3a4454;
+}
+
+button.queue-transfer-button:active {
+  background-color: #2b3442;
+}
+
+button.queue-transfer-button:disabled {
+  opacity: 0.5;
+}
+
 .section-title {
   font-weight: 600;
   color: #c3c9d4;
@@ -350,13 +389,18 @@ scale slider {
 }
 
 .sidebar-list row {
-  padding: 4px 10px;
+  padding: 6px 12px;
 }
 
 .sidebar-list row:selected {
   background-color: #2b3442;
   border-left: 3px solid #4a90e2;
-  padding-left: 7px;
+  padding-left: 9px;
+}
+
+.sidebar-list row.sidebar-section-header-row,
+.sidebar-list row.sidebar-section-header-row:hover {
+  background-color: transparent;
 }
 
 .sidebar-list row:selected label {
@@ -918,24 +962,22 @@ popover.output-popover > contents {
 .artist-detail-art {
   background-color: #1b212b;
   border: 1px solid #2a303a;
-  border-radius: 999px;          /* circular */
+  border-radius: 999px;
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.18);
 }
 
-/* Biography expander */
-.artist-bio-expander title {
-  color: #9aa4b2;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+.artist-detail-controls {
+  margin-top: 2px;
 }
 
-/* Biography text view */
 .artist-bio-text {
-  background-color: transparent;
   color: #b9c5d7;
   font-size: 12px;
   font-weight: 400;
+}
+
+.artist-bio-label {
+  margin-top: 2px;
 }
 
 .detail-play {
@@ -1195,6 +1237,27 @@ popover.track-action-popover > contents {
   font-weight: 400;
 }
 
+.artist-album-meta-row {
+  margin-top: 2px;
+}
+
+.artist-album-year {
+  color: #9aa4b2;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.artist-album-live-pill {
+  background-color: rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 999px;
+  color: #fecaca;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+}
+
 .artists-header {
   background-color: #1a2029;
   border-bottom: 1px solid #2a303a;
@@ -1378,4 +1441,43 @@ popover.track-action-popover > contents {
   background-color: rgba(0, 0, 0, 0.55);
   border-radius: 4px;
   padding: 3px 4px;
+}
+
+.provider-filter-bar {
+  padding: 0 10px 6px;
+}
+
+.provider-filter-chip {
+  background-color: #1a212b;
+  border: 1px solid #2a303a;
+  border-radius: 999px;
+  color: #9aa4b2;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  min-height: 0;
+  padding: 3px 10px;
+}
+
+.provider-filter-chip label {
+  color: #9aa4b2;
+}
+
+.provider-filter-chip:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: #3a4454;
+}
+
+.provider-filter-chip:active {
+  background-color: #2b3442;
+}
+
+.provider-filter-chip:checked {
+  background-color: rgba(74, 144, 226, 0.18);
+  border-color: rgba(74, 144, 226, 0.55);
+  color: #93c5fd;
+}
+
+.provider-filter-chip:checked label {
+  color: #93c5fd;
 }

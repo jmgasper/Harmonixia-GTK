@@ -308,22 +308,66 @@ def _serialize_album(client: MusicAssistantClient, album: object) -> dict:
     return data
 
 
-def _serialize_artist(artist: object) -> dict:
+def _serialize_artist(
+    client: MusicAssistantClient, artist: object
+) -> dict:
     if isinstance(artist, dict):
-        name = artist.get("name")
+        name = artist.get("name") or artist.get("sort_name")
+        item_id = artist.get("item_id") or artist.get("id")
+        provider = artist.get("provider") or artist.get("provider_instance") or artist.get(
+            "provider_domain"
+        )
+        uri = artist.get("uri")
     else:
-        name = getattr(artist, "name", None)
-    name = name or "Unknown Artist"
-    return {"name": name}
+        name = getattr(artist, "name", None) or getattr(artist, "sort_name", None)
+        item_id = getattr(artist, "item_id", None) or getattr(artist, "id", None)
+        provider = (
+            getattr(artist, "provider", None)
+            or getattr(artist, "provider_instance", None)
+            or getattr(artist, "provider_domain", None)
+        )
+        uri = getattr(artist, "uri", None)
+
+    image_url = _extract_artist_image_url(client, artist)
+    data = {"name": name or "Unknown Artist"}
+    if item_id is not None:
+        data["item_id"] = item_id
+    if provider:
+        data["provider"] = provider
+    if uri:
+        data["uri"] = uri
+    if image_url:
+        data["image_url"] = image_url
+    return data
 
 
 def _serialize_playlist(playlist: object) -> dict:
-    name = getattr(playlist, "name", None) or "Untitled Playlist"
-    item_id = getattr(playlist, "item_id", None)
-    provider = getattr(playlist, "provider", None)
-    uri = getattr(playlist, "uri", None)
-    owner = getattr(playlist, "owner", None)
-    is_editable = bool(getattr(playlist, "is_editable", False))
+    if isinstance(playlist, dict):
+        name = playlist.get("name") or "Untitled Playlist"
+        item_id = playlist.get("item_id") or playlist.get("id")
+        provider = (
+            playlist.get("provider")
+            or playlist.get("provider_instance")
+            or playlist.get("provider_domain")
+        )
+        uri = playlist.get("uri")
+        owner = playlist.get("owner")
+        is_editable = bool(playlist.get("is_editable", False))
+        image_url = playlist.get("image_url")
+    else:
+        name = getattr(playlist, "name", None) or "Untitled Playlist"
+        item_id = getattr(playlist, "item_id", None) or getattr(
+            playlist, "id", None
+        )
+        provider = (
+            getattr(playlist, "provider", None)
+            or getattr(playlist, "provider_instance", None)
+            or getattr(playlist, "provider_domain", None)
+        )
+        uri = getattr(playlist, "uri", None)
+        owner = getattr(playlist, "owner", None)
+        is_editable = bool(getattr(playlist, "is_editable", False))
+        image_url = getattr(playlist, "image_url", None)
     data = {
         "name": name,
         "item_id": item_id,
@@ -333,6 +377,8 @@ def _serialize_playlist(playlist: object) -> dict:
     }
     if owner:
         data["owner"] = owner
+    if image_url:
+        data["image_url"] = image_url
     return data
 
 
@@ -374,7 +420,7 @@ async def fetch_artists(client: MusicAssistantClient) -> list[dict]:
         if not page:
             break
         for artist in page:
-            artists.append(_serialize_artist(artist))
+            artists.append(_serialize_artist(client, artist))
         if len(page) < DEFAULT_PAGE_SIZE:
             break
         offset += DEFAULT_PAGE_SIZE

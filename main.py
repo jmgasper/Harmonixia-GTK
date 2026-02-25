@@ -97,6 +97,7 @@ class MusicApp(Gtk.Application):
             "window", "content_paned", "_sidebar_width_persist_id", "mpris_manager", "main_stack", "albums_flow",
             "albums_scroller", "artists_list", "artist_albums_view", "artist_albums_title",
             "artist_albums_header", "artist_albums_status_label", "artist_albums_flow",
+            "artist_play_button", "artist_shuffle_button", "artist_bio_label",
             "artist_albums_previous_view", "albums_header", "album_type_filter_button",
             "artists_header", "library_status_label", "library_loading_overlay", "library_loading_spinner",
             "library_loading_label", "library_loading_progress_bar", "library_loading_sub_label",
@@ -105,7 +106,7 @@ class MusicApp(Gtk.Application):
             "repeat_button_spinner", "shuffle_button", "shuffle_button_stack", "shuffle_button_icon",
             "shuffle_button_spinner", "repeat_all_icon_name", "repeat_one_icon_name", "shuffle_icon_name",
             "settings_server_entry", "settings_token_entry", "settings_hint_label", "settings_status_label", "settings_connect_button",
-            "settings_previous_view", "settings_output_backend_combo", "settings_pulse_device_entry", "settings_alsa_device_entry",
+            "settings_previous_view", "settings_output_backend_combo", "settings_pulse_device_entry", "settings_alsa_device_entry", "settings_bitperfect_switch",
             "eq_settings_card", "eq_preset_search_entry", "eq_graph_area", "eq_graph_placeholder", "settings_scrolled_window",
             "gtk_debug_status_label", "library_list", "home_nav_list", "playlists_list",
             "playlists_status_label", "playlists_add_button", "home_recently_played_list", "home_recently_added_list",
@@ -141,6 +142,7 @@ class MusicApp(Gtk.Application):
             "_library_refresh_source_id", "albums_refresh_button", "artists_refresh_button",
             "album_sort_button", "output_group_players_box", "output_group_rows",
             "queue_list", "queue_panel_view", "queue_status_label", "queue_panel_button", "queue_clear_button",
+            "queue_transfer_button", "queue_transfer_list", "queue_transfer_status",
             "queue_previous_view", "artist_tracks_store", "artist_tracks_sort_model",
             "artist_tracks_selection", "artist_tracks_view", "home_recent_tracks_store",
             "home_recent_tracks_sort_model", "home_recent_tracks_selection",
@@ -157,11 +159,11 @@ class MusicApp(Gtk.Application):
             "library_loading", "playlists_loading", "playlists_refresh_pending", "home_recently_played_loading",
             "home_recently_added_loading", "home_recently_played_tracks_loading", "home_recommendations_loading",
             "favorites_loading", "track_bind_logged", "playback_remote_active", "auto_load_attempted",
-            "volume_dragging", "seek_dragging", "suppress_volume_changes", "suppress_track_selection", "suppress_output_selection", "playback_sync_inflight",
+            "volume_dragging", "seek_dragging", "suppress_volume_changes", "suppress_track_selection", "suppress_output_selection", "suppress_bitperfect_sync", "playback_sync_inflight",
             "playback_pending", "provider_manifest_loading",
             "_resume_after_sendspin_connect", "search_loading", "search_active", "repeat_request_inflight",
             "shuffle_request_inflight", "_library_refresh_pending", "album_filter_favorite_only",
-            "queue_loading", "queue_clearing", "output_group_populating",
+            "queue_loading", "queue_clearing", "queue_transferring", "output_group_populating",
         ):
             setattr(self, name, False)
         self._pending_connection_callbacks = None
@@ -184,6 +186,12 @@ class MusicApp(Gtk.Application):
         self.sidebar_width = SIDEBAR_WIDTH
         self.album_type_check_buttons = {}
         self.selected_album_types = set()
+        self.selected_providers = set()
+        self.provider_check_buttons = {}
+        self.search_provider_check_buttons = {}
+        self.album_provider_filter_bar = None
+        self.search_provider_filter_bar = None
+        self._raw_search_results = None
         self.grouped_player_ids = set()
         self.library_albums = []
         self.playlists = []
@@ -209,6 +217,7 @@ class MusicApp(Gtk.Application):
         self.output_backend = ""
         self.output_pulse_device = ""
         self.output_alsa_device = ""
+        self.output_bitperfect = False
         self.local_device_names = ui_utils.get_local_device_names()
         self.audio_pipeline = audio_pipeline.AudioPipeline(
             get_supported_formats=lambda: (
@@ -565,18 +574,18 @@ for binder, source, names in (
     (_bind_static_methods, album_grid, ("pick_icon_name",)),
     (_bind_methods, settings_manager, ("load_settings", "save_settings", "persist_sendspin_settings", "persist_output_selection", "persist_eq_settings", "persist_album_density", "reset_ui_preferences", "_on_sidebar_width_changed", "update_settings_entries", "connect_to_server")),
     (_bind_methods, settings_panel, ("navigate_to_eq_settings", "refresh_playback_settings", "_load_playback_settings_worker", "_fetch_player_playback_settings_async", "on_player_playback_settings_loaded", "on_playback_settings_apply_clicked")),
-    (_bind_methods, event_handlers, ("on_track_action_clicked", "on_track_selection_changed", "clear_track_selection", "on_play_pause_clicked", "on_previous_clicked", "on_next_clicked", "on_repeat_clicked", "on_shuffle_clicked", "on_volume_changed", "_apply_volume_change", "on_volume_keyboard_adjust", "on_volume_drag_begin", "on_volume_drag_end", "on_seek_scale_changed", "on_seek_drag_begin", "on_seek_drag_end", "on_seek_keyboard_adjust", "on_mute_button_clicked", "on_playback_progress_clicked", "on_now_playing_title_clicked", "on_now_playing_artist_clicked", "on_album_detail_artist_clicked", "on_now_playing_art_clicked", "on_now_playing_art_context_menu", "on_album_card_play_clicked", "on_album_card_context_action", "on_artist_row_context_action", "on_playlist_row_context_action")),
+    (_bind_methods, event_handlers, ("on_track_action_clicked", "on_track_selection_changed", "clear_track_selection", "on_play_pause_clicked", "on_previous_clicked", "on_next_clicked", "on_repeat_clicked", "on_shuffle_clicked", "on_volume_changed", "_apply_volume_change", "on_volume_keyboard_adjust", "on_volume_drag_begin", "on_volume_drag_end", "on_seek_scale_changed", "on_seek_drag_begin", "on_seek_drag_end", "on_seek_keyboard_adjust", "on_mute_button_clicked", "on_playback_progress_clicked", "on_now_playing_title_clicked", "on_now_playing_artist_clicked", "on_album_detail_artist_clicked", "on_now_playing_art_clicked", "on_now_playing_art_context_menu", "on_album_card_play_clicked", "on_album_card_context_action", "on_artist_row_context_action", "on_playlist_row_context_action", "on_playlist_card_play_clicked", "on_playlist_card_shuffle_clicked")),
     (_bind_methods, output_handlers, ("on_output_popover_mapped", "on_output_target_activated", "on_outputs_changed", "_apply_outputs_changed", "on_output_selected", "_apply_output_selected", "on_output_loading_changed", "_apply_output_loading_changed", "on_local_output_selection_changed", "set_output_status", "on_group_player_toggled", "on_sendspin_connected", "on_sendspin_disconnected", "on_sendspin_stream_start", "on_sendspin_stream_end", "on_sendspin_stream_clear", "on_sendspin_audio_chunk", "on_sendspin_volume_change", "on_sendspin_mute_change", "update_volume_slider", "update_mute_button_icon", "set_sendspin_volume", "set_sendspin_muted", "set_output_volume", "_volume_command_worker", "cancel_sendspin_pipeline_teardown", "schedule_sendspin_pipeline_teardown", "_sendspin_pipeline_teardown")),
     (_bind_methods, album_operations, ("show_album_detail", "set_album_detail_status", "get_albums_scroll_position", "restore_album_scroll", "load_album_tracks", "_load_album_tracks_worker", "_fetch_album_tracks_async", "on_album_tracks_loaded", "populate_track_table", "on_album_detail_close", "on_album_play_clicked", "on_album_add_to_queue_clicked", "on_album_add_to_playlist_clicked", "on_album_start_radio_clicked", "is_same_album")),
     (_bind_static_methods, album_operations, ("get_album_name", "get_album_track_candidates", "get_album_identity")),
-    (_bind_methods, artist_operations, ("show_artist_albums", "refresh_artist_albums", "populate_artist_album_flow", "on_artist_row_activated", "on_artist_album_activated", "on_artist_albums_back", "_fetch_artist_top_tracks_async", "on_artist_top_tracks_loaded", "_fetch_artist_bio_async", "on_artist_bio_loaded")),
+    (_bind_methods, artist_operations, ("show_artist_albums", "refresh_artist_albums", "populate_artist_album_flow", "on_artist_row_activated", "on_artist_album_activated", "on_artist_albums_back", "on_artist_play_clicked", "on_artist_shuffle_clicked", "_fetch_artist_top_tracks_async", "on_artist_top_tracks_loaded", "_fetch_artist_bio_async", "on_artist_bio_loaded")),
     (_bind_methods, playlist_operations, ("show_playlist_detail", "set_playlist_detail_status", "load_playlist_tracks", "_load_playlist_tracks_worker", "_fetch_playlist_tracks_async", "on_playlist_tracks_loaded", "populate_playlist_track_table", "on_playlist_play_clicked", "on_playlist_shuffle_clicked")),
     (_bind_methods, favorites_manager, ("load_favorites", "_load_favorites_worker", "_fetch_favorites_tracks_async", "on_favorites_loaded", "populate_favorites_tracks", "set_favorites_status")),
     (_bind_methods, playback_state, ("start_playback_from_track", "start_playback_from_index", "handle_previous_action", "handle_next_action", "restart_current_track", "sync_playback_highlight", "stop_playback", "set_playback_state", "update_play_pause_icon", "ensure_playback_timer", "on_playback_tick", "update_now_playing", "update_sidebar_now_playing_art", "update_now_playing_art_thumb", "update_playback_progress_ui", "ensure_remote_playback_sync", "refresh_remote_playback_state", "stop_remote_playback_sync", "_start_playback_listener", "_stop_playback_listener", "_playback_listener_worker", "_playback_listener_async", "_remote_playback_sync_tick", "_sync_remote_playback_worker", "_fetch_remote_playback_state_async", "_apply_remote_playback_state", "queue_album_playback", "_play_album_worker", "send_playback_command", "_playback_command_worker", "send_playback_index", "_playback_index_worker", "update_queue_controls", "cycle_repeat_mode", "toggle_shuffle", "set_shuffle_enabled", "mark_playback_started", "_load_provider_manifests_worker", "_fetch_provider_manifests_async", "on_provider_manifests_loaded")),
     (_bind_methods, library_manager, ("load_library", "_load_library_worker", "on_library_loaded", "_handle_library_change_refresh", "set_loading_state", "set_loading_message", "set_status", "populate_artists_list", "build_artists_section")),
-    (_bind_methods, search_manager, ("on_search_changed", "on_search_activated", "on_search_scope_toggled", "activate_search_view", "restore_search_view", "clear_search", "schedule_search", "_run_search", "_start_search", "_search_worker", "_fetch_search_results_async", "on_search_results_loaded", "set_search_status", "clear_search_results", "populate_search_playlists", "populate_search_albums", "populate_search_artists", "populate_search_tracks", "on_search_album_activated", "on_search_playlist_activated")),
+    (_bind_methods, search_manager, ("on_search_changed", "on_search_activated", "on_search_scope_toggled", "activate_search_view", "restore_search_view", "clear_search", "schedule_search", "_run_search", "_start_search", "_search_worker", "_fetch_search_results_async", "on_search_results_loaded", "set_search_status", "clear_search_results", "populate_search_playlists", "populate_search_albums", "populate_search_artists", "populate_search_tracks", "reapply_search_provider_filter", "on_search_provider_filter_toggled", "_rebuild_search_provider_chips", "on_search_album_activated", "on_search_playlist_activated")),
     (_bind_methods, home_manager, ("refresh_home_sections", "clear_home_recent_lists", "schedule_home_recently_played_refresh", "_handle_home_recently_played_refresh", "refresh_home_recently_played", "refresh_home_recently_played_tracks", "refresh_home_recently_added", "refresh_home_recommendations", "_load_recently_played_worker", "_load_recently_played_tracks_worker", "_load_recently_added_worker", "_load_recommendations_worker", "_fetch_recently_played_albums_async", "_fetch_recently_played_tracks_async", "_fetch_recently_added_albums_async", "_fetch_home_recommendations_async", "on_recently_played_loaded", "on_recently_played_tracks_loaded", "on_recently_added_loaded", "on_recommendations_loaded", "ensure_home_artwork", "on_main_stack_visible_child_changed", "clear_home_album_selection")),
-    (_bind_methods, queue_panel, ("on_queue_button_clicked", "on_queue_panel_close_clicked", "on_queue_clear_clicked", "refresh_queue_panel", "_load_queue_panel_worker", "on_queue_items_loaded", "on_queue_row_activated", "on_queue_item_remove_clicked", "on_queue_item_move_clicked")),
+    (_bind_methods, queue_panel, ("on_queue_button_clicked", "on_queue_panel_close_clicked", "on_queue_clear_clicked", "on_queue_transfer_popover_mapped", "on_queue_transfer_row_activated", "on_queue_transfer_clicked", "refresh_queue_panel", "_load_queue_panel_worker", "on_queue_items_loaded", "on_queue_row_activated", "on_queue_item_remove_clicked", "on_queue_item_move_clicked")),
     (_bind_methods, sleep_timer, ("start_sleep_timer", "cancel_sleep_timer", "_sleep_timer_tick")),
 ):
     binder(source, names)

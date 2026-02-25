@@ -199,12 +199,29 @@ def build_settings_section(app) -> Gtk.Widget:
     if app.output_alsa_device:
         alsa_entry.set_text(app.output_alsa_device)
 
+    bitperfect_label = Gtk.Label(label="Bit-Perfect (Direct USB)", xalign=0)
+    bitperfect_switch = Gtk.Switch()
+    bitperfect_switch.set_halign(Gtk.Align.START)
+    bitperfect_switch.set_active(bool(getattr(app, "output_bitperfect", False)))
+    bitperfect_hint = Gtk.Label(
+        label=(
+            "Sends audio directly to the USB DAC via ALSA hw: path. "
+            "Disables volume control and EQ."
+        )
+    )
+    bitperfect_hint.add_css_class("status-label")
+    bitperfect_hint.set_xalign(0)
+    bitperfect_hint.set_wrap(True)
+
     output_grid.attach(backend_label, 0, 0, 1, 1)
     output_grid.attach(backend_combo, 1, 0, 1, 1)
     output_grid.attach(pulse_label, 0, 1, 1, 1)
     output_grid.attach(pulse_entry, 1, 1, 1, 1)
     output_grid.attach(alsa_label, 0, 2, 1, 1)
     output_grid.attach(alsa_entry, 1, 2, 1, 1)
+    output_grid.attach(bitperfect_label, 0, 3, 1, 1)
+    output_grid.attach(bitperfect_switch, 1, 3, 1, 1)
+    output_grid.attach(bitperfect_hint, 0, 4, 2, 1)
     output_card.append(output_grid)
 
     output_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -372,10 +389,15 @@ def build_settings_section(app) -> Gtk.Widget:
     app.settings_output_backend_combo = backend_combo
     app.settings_pulse_device_entry = pulse_entry
     app.settings_alsa_device_entry = alsa_entry
+    app.settings_bitperfect_switch = bitperfect_switch
     app.settings_crossfade_spin = crossfade_spin
     app.settings_flow_mode_switch = flow_mode_switch
     app.settings_playback_apply_button = playback_apply_button
     app.settings_playback_status_label = playback_status
+    bitperfect_switch.connect(
+        "notify::active",
+        lambda *_: _on_bitperfect_switch_changed(app, bitperfect_switch),
+    )
     server_entry.connect(
         "activate",
         lambda *_: on_settings_connect_clicked(app, connect_button),
@@ -529,6 +551,13 @@ def on_gtk_debug_enable_clicked(app, _button: Gtk.Button) -> None:
             "GTK Inspector enabled. Press Ctrl+Shift+D to open it."
         )
         app.gtk_debug_status_label.set_visible(True)
+
+
+def _on_bitperfect_switch_changed(app, bitperfect_switch: Gtk.Switch) -> None:
+    if getattr(app, "suppress_bitperfect_sync", False):
+        return
+    app.output_bitperfect = bitperfect_switch.get_active()
+    app.persist_output_selection()
 
 
 def on_output_settings_apply_clicked(app, _button: Gtk.Button) -> None:
