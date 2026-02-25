@@ -387,8 +387,11 @@ async def _fetch_recently_played_albums_async(
         else:
             data = library._serialize_album(client, item)
             data["media_type"] = MediaType.ALBUM.value
-            if not data.get("image_url") and not data.get("artists"):
-                item_id, provider = _get_album_identity(item)
+            if not data.get("artists"):
+                item_id = data.get("item_id")
+                provider = data.get("provider")
+                if not item_id or not provider:
+                    item_id, provider = _get_album_identity(item)
                 if item_id and provider:
                     try:
                         item = await client.music.get_album(item_id, provider)
@@ -466,19 +469,40 @@ async def _fetch_recently_added_albums_async(
 
 
 def _get_album_identity(album: object) -> tuple[str | None, str | None]:
+    nested = None
     if isinstance(album, dict):
-        return (
-            album.get("item_id") or album.get("id"),
+        item_id = album.get("item_id") or album.get("id")
+        provider = (
             album.get("provider")
             or album.get("provider_instance")
-            or album.get("provider_domain"),
+            or album.get("provider_domain")
         )
-    return (
-        getattr(album, "item_id", None) or getattr(album, "id", None),
-        getattr(album, "provider", None)
-        or getattr(album, "provider_instance", None)
-        or getattr(album, "provider_domain", None),
-    )
+        nested = (
+            album.get("media_item")
+            or album.get("item")
+            or album.get("album")
+            or album.get("payload")
+        )
+    else:
+        item_id = getattr(album, "item_id", None) or getattr(album, "id", None)
+        provider = (
+            getattr(album, "provider", None)
+            or getattr(album, "provider_instance", None)
+            or getattr(album, "provider_domain", None)
+        )
+        nested = (
+            getattr(album, "media_item", None)
+            or getattr(album, "item", None)
+            or getattr(album, "album", None)
+            or getattr(album, "payload", None)
+        )
+    if item_id and provider:
+        return item_id, provider
+    if nested and nested is not album:
+        nested_item_id, nested_provider = _get_album_identity(nested)
+        if nested_item_id or nested_provider:
+            return nested_item_id, nested_provider
+    return item_id, provider
 
 
 async def _fetch_home_recommendations_async(

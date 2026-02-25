@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from music_assistant_client import MusicAssistantClient
-from music_assistant_models.enums import AlbumType
+from music_assistant_models.enums import AlbumType, ImageType
 from music_assistant_models.media_items import Playlist
 
 from constants import DEFAULT_PAGE_SIZE
@@ -29,6 +29,35 @@ def pick_album_value(album: object, fields: tuple[str, ...]) -> object | None:
             continue
         return value
     return None
+
+
+def _serialize_provider_mappings(raw_mappings: object) -> list[dict]:
+    serialized: list[dict] = []
+    mappings = raw_mappings or []
+    if isinstance(mappings, dict):
+        mappings = [mappings]
+    elif not isinstance(mappings, (list, tuple, set)):
+        mappings = [mappings]
+    for mapping in mappings:
+        if isinstance(mapping, dict):
+            serialized.append(
+                {
+                    "item_id": mapping.get("item_id"),
+                    "provider_instance": mapping.get("provider_instance"),
+                    "provider_domain": mapping.get("provider_domain"),
+                    "available": mapping.get("available", True),
+                }
+            )
+            continue
+        serialized.append(
+            {
+                "item_id": getattr(mapping, "item_id", None),
+                "provider_instance": getattr(mapping, "provider_instance", None),
+                "provider_domain": getattr(mapping, "provider_domain", None),
+                "available": getattr(mapping, "available", True),
+            }
+        )
+    return serialized
 
 
 def _coerce_int(value: object) -> int | None:
@@ -147,12 +176,31 @@ def _extract_artist_image_url(
     if artist is None:
         return None
     if not isinstance(artist, dict):
-        try:
-            image_url = client.get_media_item_image_url(artist)
-        except Exception:
-            image_url = None
-        if image_url:
-            return image_url
+        image_types: tuple[ImageType | None, ...] = (
+            None,
+            ImageType.THUMB,
+            ImageType.LANDSCAPE,
+            ImageType.FANART,
+            ImageType.LOGO,
+        )
+        for image_type in image_types:
+            try:
+                if image_type is None:
+                    image_url = client.get_media_item_image_url(artist)
+                else:
+                    image_url = client.get_media_item_image_url(
+                        artist,
+                        image_type,
+                    )
+            except TypeError:
+                if image_type is None:
+                    image_url = None
+                else:
+                    continue
+            except Exception:
+                image_url = None
+            if image_url:
+                return image_url
     if isinstance(artist, dict):
         for key in ("image_url", "image", "thumbnail", "artwork", "cover"):
             value = artist.get(key)
@@ -187,31 +235,9 @@ def _serialize_album(client: MusicAssistantClient, album: object) -> dict:
     album_type = normalize_album_type(
         pick_album_value(album, ("album_type", "type"))
     )
-    provider_mappings = []
-    raw_mappings = pick_album_value(album, ("provider_mappings",)) or []
-    if isinstance(raw_mappings, dict):
-        raw_mappings = [raw_mappings]
-    elif not isinstance(raw_mappings, (list, tuple, set)):
-        raw_mappings = [raw_mappings]
-    for mapping in raw_mappings:
-        if isinstance(mapping, dict):
-            provider_mappings.append(
-                {
-                    "item_id": mapping.get("item_id"),
-                    "provider_instance": mapping.get("provider_instance"),
-                    "provider_domain": mapping.get("provider_domain"),
-                    "available": mapping.get("available", True),
-                }
-            )
-            continue
-        provider_mappings.append(
-            {
-                "item_id": getattr(mapping, "item_id", None),
-                "provider_instance": getattr(mapping, "provider_instance", None),
-                "provider_domain": getattr(mapping, "provider_domain", None),
-                "available": getattr(mapping, "available", True),
-            }
-        )
+    provider_mappings = _serialize_provider_mappings(
+        pick_album_value(album, ("provider_mappings",))
+    )
 
     raw_artists = pick_album_value(album, ("artists",))
     if not raw_artists:
@@ -318,6 +344,9 @@ def _serialize_artist(
             "provider_domain"
         )
         uri = artist.get("uri")
+        provider_mappings = _serialize_provider_mappings(
+            artist.get("provider_mappings")
+        )
     else:
         name = getattr(artist, "name", None) or getattr(artist, "sort_name", None)
         item_id = getattr(artist, "item_id", None) or getattr(artist, "id", None)
@@ -327,6 +356,15 @@ def _serialize_artist(
             or getattr(artist, "provider_domain", None)
         )
         uri = getattr(artist, "uri", None)
+        provider_mappings = _serialize_provider_mappings(
+            getattr(artist, "provider_mappings", None)
+        )
+
+    if not provider and provider_mappings:
+        first_mapping = provider_mappings[0]
+        provider = first_mapping.get("provider_instance") or first_mapping.get(
+            "provider_domain"
+        )
 
     image_url = _extract_artist_image_url(client, artist)
     data = {"name": name or "Unknown Artist"}
@@ -336,6 +374,8 @@ def _serialize_artist(
         data["provider"] = provider
     if uri:
         data["uri"] = uri
+    if provider_mappings:
+        data["provider_mappings"] = provider_mappings
     if image_url:
         data["image_url"] = image_url
     return data

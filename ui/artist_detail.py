@@ -106,20 +106,42 @@ def build_artist_albums_section(app) -> Gtk.Widget:
     status.set_visible(False)
     container.append(status)
 
-    albums_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    albums_section.add_css_class("search-group")
+    my_albums_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    my_albums_section.add_css_class("search-group")
 
-    albums_header = Gtk.Label(label="Albums")
-    albums_header.add_css_class("section-title")
-    albums_header.set_xalign(0)
-    albums_section.append(albums_header)
+    my_albums_header = Gtk.Label(label="My Albums")
+    my_albums_header.add_css_class("section-title")
+    my_albums_header.set_xalign(0)
+    my_albums_section.append(my_albums_header)
 
-    flow = Gtk.FlowBox()
-    ui_utils.configure_media_flowbox(flow, Gtk.SelectionMode.SINGLE)
-    flow.connect("child-activated", app.on_artist_album_activated)
-    albums_section.append(flow)
+    my_albums_flow = Gtk.FlowBox()
+    ui_utils.configure_media_flowbox(my_albums_flow, Gtk.SelectionMode.SINGLE)
+    my_albums_flow.connect("child-activated", app.on_artist_album_activated)
+    my_albums_section.append(my_albums_flow)
 
-    container.append(albums_section)
+    container.append(my_albums_section)
+
+    all_albums_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    all_albums_section.add_css_class("search-group")
+
+    all_albums_header = Gtk.Label(label="All Albums")
+    all_albums_header.add_css_class("section-title")
+    all_albums_header.set_xalign(0)
+    all_albums_section.append(all_albums_header)
+
+    all_albums_status = Gtk.Label()
+    all_albums_status.add_css_class("status-label")
+    all_albums_status.set_xalign(0)
+    all_albums_status.set_wrap(True)
+    all_albums_status.set_visible(False)
+    all_albums_section.append(all_albums_status)
+
+    all_albums_flow = Gtk.FlowBox()
+    ui_utils.configure_media_flowbox(all_albums_flow, Gtk.SelectionMode.SINGLE)
+    all_albums_flow.connect("child-activated", app.on_artist_album_activated)
+    all_albums_section.append(all_albums_flow)
+
+    container.append(all_albums_section)
 
     tracks_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
     tracks_section.add_css_class("search-group")
@@ -173,7 +195,10 @@ def build_artist_albums_section(app) -> Gtk.Widget:
     app.artist_bio_label = bio_label
     app.artist_play_button = play_button
     app.artist_shuffle_button = shuffle_button
-    app.artist_albums_header = albums_header
+    app.artist_albums_header = my_albums_header
     app.artist_albums_status_label = status
-    app.artist_albums_flow = flow
+    app.artist_albums_flow = my_albums_flow
+    app.artist_all_albums_header = all_albums_header
+    app.artist_all_albums_status_label = all_albums_status
+    app.artist_all_albums_flow = all_albums_flow
     return scroller

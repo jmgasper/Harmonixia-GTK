@@ -715,6 +715,8 @@ def on_album_detail_close(app, _button: Gtk.Button) -> None:
     elif target_view == "artist-albums":
         if app.artist_albums_flow:
             app.artist_albums_flow.unselect_all()
+        if getattr(app, "artist_all_albums_flow", None):
+            app.artist_all_albums_flow.unselect_all()
     elif target_view == "albums":
         GLib.idle_add(app.restore_album_scroll)
 

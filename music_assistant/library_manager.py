@@ -142,6 +142,7 @@ def on_library_loaded(
     from ui import album_grid
 
     album_grid.set_album_items(app, albums)
+    app.library_artists = list(artists or [])
     app.populate_artists_list(artists)
 
     if app.artists_header:

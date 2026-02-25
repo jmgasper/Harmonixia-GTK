@@ -2,9 +2,10 @@ import threading
 
 from gi.repository import GLib, Gtk
 
-from constants import DETAIL_ART_SIZE, MEDIA_TILE_SIZE
-from music_assistant import playback
+from constants import DEFAULT_PAGE_SIZE, DETAIL_ART_SIZE, MEDIA_TILE_SIZE
+from music_assistant import library, playback
 from music_assistant_client import MusicAssistantClient
+from music_assistant_models.enums import MediaType
 from ui import image_loader, toast, ui_utils
 from ui import track_utils
 from ui.widgets import album_card
@@ -39,6 +40,7 @@ def show_artist_albums(
     artist: object,
     previous_view: str | None = None,
 ) -> None:
+    artist = _resolve_artist_reference(app, artist)
     app.current_artist = artist
     if previous_view:
         app.artist_albums_previous_view = previous_view
@@ -49,29 +51,68 @@ def show_artist_albums(
         app.main_stack.set_visible_child_name("artist-albums")
 
 
+def _resolve_artist_reference(app, artist: object) -> object:
+    if isinstance(artist, dict) or not isinstance(artist, str):
+        return artist
+    name = _normalize_text(artist)
+    if not name:
+        return artist
+    normalized_name = normalize_artist_name(name)
+    candidates = getattr(app, "library_artists", None) or []
+    best_match = None
+    best_score = -1
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_name = normalize_artist_name(get_artist_name(candidate))
+        if candidate_name != normalized_name:
+            continue
+        score = 0
+        if _get_artist_item_id(candidate):
+            score += 2
+        if _get_artist_provider(candidate):
+            score += 2
+        if candidate.get("provider_mappings"):
+            score += 1
+        if candidate.get("image_url"):
+            score += 1
+        if score > best_score:
+            best_match = candidate
+            best_score = score
+    return best_match if best_match is not None else name
+
+
 def refresh_artist_albums(app) -> None:
     artist = getattr(app, "current_artist", None)
     if not artist:
         return
     _update_artist_playback_controls(app, artist)
     artist_name = get_artist_name(artist)
-    albums = filter_artist_albums(app, artist_name)
-    update_artist_albums_header(app, artist_name, len(albums))
-    populate_artist_album_flow(app, albums)
-    update_artist_albums_status(app, artist_name, albums)
-    _start_artist_top_tracks_refresh(app, artist, artist_name)
+    library_albums = filter_artist_albums(app, artist_name)
+    update_artist_albums_header(app, artist_name, len(library_albums))
+    populate_artist_album_flow(app, library_albums)
+    update_artist_albums_status(app, artist_name, library_albums)
+    _start_artist_all_albums_refresh(app, artist, library_albums)
+    _start_artist_top_tracks_refresh(app, artist)
     _start_artist_bio_refresh(app, artist)
 
 
 def update_artist_albums_header(
     app,
     artist_name: str,
-    album_count: int,
+    library_album_count: int,
+    all_album_count: int | None = None,
 ) -> None:
     if app.artist_albums_title:
         app.artist_albums_title.set_label(artist_name)
     if app.artist_albums_header:
-        app.artist_albums_header.set_label(f"Albums ({album_count})")
+        app.artist_albums_header.set_label(f"My Albums ({library_album_count})")
+    all_header = getattr(app, "artist_all_albums_header", None)
+    if all_header:
+        if all_album_count is None:
+            all_header.set_label("All Albums")
+        else:
+            all_header.set_label(f"All Albums ({all_album_count})")
 
 
 def update_artist_albums_status(
@@ -87,15 +128,31 @@ def update_artist_albums_status(
     elif app.library_loading and not app.library_albums:
         message = "Loading library..."
     elif not albums:
-        message = f"No albums found for {artist_name}."
+        message = (
+            f"No albums in your library for {artist_name}."
+            " All available albums are shown below."
+        )
     app.artist_albums_status_label.set_label(message)
     app.artist_albums_status_label.set_visible(bool(message))
 
 
-def populate_artist_album_flow(app, albums: list[dict]) -> None:
-    if not app.artist_albums_flow:
+def _set_artist_all_albums_status(app, message: str) -> None:
+    status_label = getattr(app, "artist_all_albums_status_label", None)
+    if not status_label:
         return
-    ui_utils.clear_container(app.artist_albums_flow)
+    status_label.set_label(message)
+    status_label.set_visible(bool(message))
+
+
+def populate_artist_album_flow(
+    app,
+    albums: list[dict],
+    target_flow: Gtk.FlowBox | None = None,
+) -> None:
+    flow = target_flow if target_flow is not None else app.artist_albums_flow
+    if not flow:
+        return
+    ui_utils.clear_container(flow)
     for album in albums:
         if not isinstance(album, dict):
             continue
@@ -119,7 +176,102 @@ def populate_artist_album_flow(app, albums: list[dict]) -> None:
         child.set_vexpand(False)
         child.set_size_request(MEDIA_TILE_SIZE, -1)
         child.album_data = album
-        app.artist_albums_flow.append(child)
+        flow.append(child)
+
+
+def _start_artist_all_albums_refresh(
+    app,
+    artist: object,
+    library_albums: list[dict],
+) -> None:
+    all_flow = getattr(app, "artist_all_albums_flow", None)
+    if not all_flow:
+        return
+    if not app.server_url:
+        all_albums = _dedupe_artist_albums(library_albums)
+        populate_artist_album_flow(app, all_albums, all_flow)
+        update_artist_albums_header(
+            app,
+            get_artist_name(artist),
+            len(library_albums),
+            len(all_albums),
+        )
+        _set_artist_all_albums_status(
+            app,
+            "Connect to a server to load albums across all providers.",
+        )
+        return
+    ui_utils.clear_container(all_flow)
+    _set_artist_all_albums_status(app, "Loading all albums across providers...")
+    thread = threading.Thread(
+        target=_load_artist_all_albums_worker,
+        args=(app, artist),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _load_artist_all_albums_worker(
+    app,
+    artist: object,
+) -> None:
+    error = ""
+    albums: list[dict] = []
+    try:
+        albums = app.client_session.run(
+            app.server_url,
+            app.auth_token,
+            app._fetch_artist_all_albums_async,
+            artist,
+        )
+    except Exception as exc:
+        error = str(exc)
+    GLib.idle_add(app.on_artist_all_albums_loaded, artist, albums, error)
+
+
+def _artist_identity(artist: object | None) -> tuple[str, str] | str:
+    if artist is None:
+        return ""
+    item_id = _get_artist_item_id(artist)
+    provider = _get_artist_provider(artist)
+    if item_id and provider:
+        return (item_id.casefold(), provider.casefold())
+    return normalize_artist_name(get_artist_name(artist))
+
+
+def on_artist_all_albums_loaded(
+    app,
+    artist: object,
+    albums: list[dict],
+    error: str,
+) -> None:
+    current_artist = getattr(app, "current_artist", None)
+    if _artist_identity(artist) != _artist_identity(current_artist):
+        return
+    artist_name = get_artist_name(current_artist)
+    library_albums = filter_artist_albums(app, artist_name)
+    all_albums = _dedupe_artist_albums(albums)
+    if not all_albums:
+        all_albums = _dedupe_artist_albums(library_albums)
+    populate_artist_album_flow(
+        app,
+        all_albums,
+        getattr(app, "artist_all_albums_flow", None),
+    )
+    update_artist_albums_header(
+        app,
+        artist_name,
+        len(library_albums),
+        len(all_albums),
+    )
+    message = ""
+    if error and not all_albums:
+        message = f"Could not load all provider albums: {error}"
+    elif error:
+        message = "Showing available albums; full provider catalog could not be loaded."
+    elif not all_albums:
+        message = f"No albums available for {artist_name}."
+    _set_artist_all_albums_status(app, message)
 
 
 def on_artist_album_activated(
@@ -241,8 +393,12 @@ def _update_artist_playback_controls(app, artist: object) -> None:
 def get_artist_name(artist: object) -> str:
     if isinstance(artist, dict):
         name = artist.get("name") or artist.get("sort_name")
+    elif isinstance(artist, str):
+        name = artist
     else:
-        name = str(artist) if artist is not None else ""
+        name = getattr(artist, "name", None) or getattr(artist, "sort_name", None)
+        if not name and artist is not None:
+            name = str(artist)
     return name or "Unknown Artist"
 
 
@@ -313,7 +469,79 @@ def filter_artist_albums(app, artist_name: str) -> list[dict]:
             if candidate and normalize_artist_name(candidate) == normalized:
                 albums.append(album)
                 break
-    return albums
+    return _dedupe_artist_albums(albums)
+
+
+def _collect_album_artist_names(album: object) -> list[str]:
+    raw_artists = _pick_album_field(
+        album,
+        (
+            "artists",
+            "artist",
+            "artist_str",
+            "album_artist",
+            "album_artist_str",
+        ),
+    )
+    if not raw_artists:
+        return []
+    if isinstance(raw_artists, str):
+        values = [raw_artists]
+    elif isinstance(raw_artists, (list, tuple, set)):
+        values = list(raw_artists)
+    else:
+        values = [raw_artists]
+    names: list[str] = []
+    for artist in values:
+        if isinstance(artist, dict):
+            candidate = artist.get("name") or artist.get("sort_name")
+        else:
+            candidate = getattr(artist, "name", None) or getattr(
+                artist, "sort_name", None
+            )
+            if not candidate and isinstance(artist, str):
+                candidate = artist
+        normalized = _normalize_text(candidate)
+        if normalized:
+            names.append(normalized)
+    return names
+
+
+def _album_matches_artist(album: object, artist_name: str) -> bool:
+    normalized_artist = normalize_artist_name(artist_name)
+    if not normalized_artist:
+        return False
+    for name in _collect_album_artist_names(album):
+        if normalize_artist_name(name) == normalized_artist:
+            return True
+    return False
+
+
+def _album_dedupe_key(album: object) -> tuple[str, str, int | None, str]:
+    title = (
+        _normalize_text(_pick_album_field(album, ("name", "title")))
+        or "Unknown Album"
+    ).casefold()
+    artist_key = "|".join(
+        sorted(normalize_artist_name(name) for name in _collect_album_artist_names(album))
+    )
+    year = _extract_artist_album_year(album)
+    album_type = _normalize_album_type(_pick_album_field(album, ("album_type", "type")))
+    return title, artist_key, year, album_type
+
+
+def _dedupe_artist_albums(albums: list[object]) -> list[dict]:
+    seen: set[tuple[str, str, int | None, str]] = set()
+    deduped: list[dict] = []
+    for album in albums:
+        if not isinstance(album, dict):
+            continue
+        key = _album_dedupe_key(album)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(album)
+    return deduped
 
 
 def normalize_artist_name(name: str) -> str:
@@ -325,6 +553,62 @@ def _normalize_text(value: object | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _iter_artist_provider_mappings(artist: object):
+    if isinstance(artist, dict):
+        mappings = artist.get("provider_mappings") or []
+    else:
+        mappings = getattr(artist, "provider_mappings", None) or []
+    if isinstance(mappings, dict):
+        mappings = [mappings]
+    elif not isinstance(mappings, (list, tuple, set)):
+        mappings = [mappings]
+    for mapping in mappings:
+        if isinstance(mapping, dict):
+            item_id = mapping.get("item_id")
+            provider_instance = mapping.get("provider_instance")
+            provider_domain = mapping.get("provider_domain")
+        else:
+            item_id = getattr(mapping, "item_id", None)
+            provider_instance = getattr(mapping, "provider_instance", None)
+            provider_domain = getattr(mapping, "provider_domain", None)
+        yield item_id, provider_instance, provider_domain
+
+
+def _collect_artist_lookup_candidates(
+    artist: object,
+    preferred_provider: str | None = None,
+) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add_candidate(
+        item_id: object | None,
+        provider_value: object | None,
+    ) -> None:
+        item_id_text = _normalize_text(item_id)
+        provider_text = _normalize_text(provider_value)
+        if not item_id_text or not provider_text:
+            return
+        key = (item_id_text.casefold(), provider_text.casefold())
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append((item_id_text, provider_text))
+
+    item_id = _get_artist_item_id(artist)
+    if preferred_provider:
+        _add_candidate(item_id, preferred_provider)
+    _add_candidate(item_id, _get_artist_provider(artist))
+    for (
+        mapping_item_id,
+        mapping_provider_instance,
+        mapping_provider_domain,
+    ) in _iter_artist_provider_mappings(artist):
+        _add_candidate(mapping_item_id, mapping_provider_instance)
+        _add_candidate(mapping_item_id, mapping_provider_domain)
+    return candidates
 
 
 def _resolve_artist_media(artist_data: object) -> object | None:
@@ -371,7 +655,7 @@ def _resolve_artist_track_media(app, artist: object) -> object | None:
             app.server_url,
             app.auth_token,
             app._fetch_artist_top_tracks_async,
-            artist_name,
+            artist,
             provider,
         )
     except Exception:
@@ -506,7 +790,6 @@ def _append_artist_album_metadata(card: Gtk.Widget, album: object) -> None:
 def _start_artist_top_tracks_refresh(
     app,
     artist: object,
-    artist_name: str,
 ) -> None:
     if not getattr(app, "artist_tracks_store", None):
         return
@@ -516,7 +799,7 @@ def _start_artist_top_tracks_refresh(
     provider = _get_artist_provider(artist)
     thread = threading.Thread(
         target=_load_artist_top_tracks_worker,
-        args=(app, artist, artist_name, provider),
+        args=(app, artist, provider),
         daemon=True,
     )
     thread.start()
@@ -546,7 +829,6 @@ def _start_artist_bio_refresh(app, artist: object) -> None:
 def _load_artist_top_tracks_worker(
     app,
     artist: object,
-    artist_name: str,
     provider: str | None,
 ) -> None:
     error = ""
@@ -556,7 +838,7 @@ def _load_artist_top_tracks_worker(
             app.server_url,
             app.auth_token,
             app._fetch_artist_top_tracks_async,
-            artist_name,
+            artist,
             provider,
         )
     except Exception as exc:
@@ -585,16 +867,139 @@ def _load_artist_bio_worker(
     GLib.idle_add(app.on_artist_bio_loaded, artist, bio, image_url, error)
 
 
+async def _fetch_artist_all_albums_async(
+    app,
+    client: MusicAssistantClient,
+    artist: object,
+) -> list[dict]:
+    candidates = await _fetch_artist_album_candidates(client, artist)
+    serialized: list[dict] = []
+    for album in candidates:
+        full_album = await _ensure_full_artist_album(client, album)
+        serialized.append(library._serialize_album(client, full_album))
+    return _dedupe_artist_albums(serialized)
+
+
+async def _fetch_artist_album_candidates(
+    client: MusicAssistantClient,
+    artist: object,
+) -> list[object]:
+    item_id = _get_artist_item_id(artist)
+    provider = _get_artist_provider(artist)
+    artist_name = get_artist_name(artist)
+    if item_id and provider:
+        albums = await _fetch_artist_albums_by_reference(
+            client,
+            item_id,
+            provider,
+        )
+        if albums:
+            return albums
+    if artist_name and provider:
+        albums = await _fetch_artist_albums_by_reference(
+            client,
+            artist_name,
+            provider,
+        )
+        if albums:
+            return albums
+    return await _search_artist_album_candidates(client, artist_name)
+
+
+async def _fetch_artist_albums_by_reference(
+    client: MusicAssistantClient,
+    artist_reference: str,
+    provider: str,
+) -> list[object]:
+    getter = getattr(client.music, "get_artist_albums", None)
+    if getter is None:
+        return []
+    try:
+        return list(
+            await getter(
+                artist_reference,
+                provider,
+                in_library_only=False,
+            )
+            or []
+        )
+    except TypeError:
+        try:
+            return list(await getter(artist_reference, provider) or [])
+        except Exception:
+            return []
+    except Exception:
+        return []
+
+
+async def _search_artist_album_candidates(
+    client: MusicAssistantClient,
+    artist_name: str,
+) -> list[object]:
+    if not normalize_artist_name(artist_name):
+        return []
+    try:
+        search_results = await client.music.search(
+            search_query=artist_name,
+            media_types=[MediaType.ALBUM],
+            limit=DEFAULT_PAGE_SIZE,
+            library_only=False,
+        )
+    except Exception:
+        return []
+    albums = list(getattr(search_results, "albums", None) or [])
+    matches = [album for album in albums if _album_matches_artist(album, artist_name)]
+    return matches or albums
+
+
+async def _ensure_full_artist_album(
+    client: MusicAssistantClient,
+    album: object,
+) -> object:
+    if getattr(album, "provider_mappings", None):
+        return album
+    item_id = _pick_album_field(album, ("item_id", "id"))
+    provider = _pick_album_field(
+        album,
+        ("provider", "provider_instance", "provider_domain"),
+    )
+    if not item_id or not provider:
+        return album
+    try:
+        return await client.music.get_album(str(item_id), str(provider))
+    except Exception:
+        return album
+
+
 async def _fetch_artist_top_tracks_async(
     app,
     client: MusicAssistantClient,
-    artist_name: str,
+    artist: object,
     provider: str | None,
 ) -> list[dict]:
-    if provider:
-        tracks = await client.music.get_artist_tracks(artist_name, provider)
-    else:
-        tracks = await client.music.get_artist_tracks(artist_name)
+    tracks: list[object] = []
+    artist_name = get_artist_name(artist)
+    for item_id, provider_id in _collect_artist_lookup_candidates(
+        artist,
+        provider,
+    ):
+        try:
+            tracks = await client.music.get_artist_tracks(item_id, provider_id)
+        except Exception:
+            continue
+        if tracks:
+            break
+    if not tracks and artist_name:
+        if provider:
+            try:
+                tracks = await client.music.get_artist_tracks(artist_name, provider)
+            except Exception:
+                tracks = []
+        if not tracks:
+            try:
+                tracks = await client.music.get_artist_tracks(artist_name)
+            except Exception:
+                tracks = []
     describe_quality = lambda item: track_utils.describe_track_quality(
         item,
         track_utils.format_sample_rate,
@@ -627,31 +1032,100 @@ async def _fetch_artist_bio_async(
     provider: str | None,
 ) -> tuple[str, str | None]:
     bio = ""
-    image_url = None
-    fetch_failed = False
-    item_id = _get_artist_item_id(artist)
-    if item_id and provider:
+    image_url: str | None = None
+    for item_id, provider_id in _collect_artist_lookup_candidates(
+        artist,
+        provider,
+    ):
         try:
-            full_artist = await client.music.get_artist(item_id, provider)
+            full_artist = await client.music.get_artist(item_id, provider_id)
+        except Exception:
+            continue
+        if not bio:
             bio = _extract_artist_bio(full_artist)
+        if not image_url:
             image_url = image_loader.resolve_media_item_image_url(
                 client,
                 full_artist,
                 app.server_url,
             )
-        except Exception:
-            fetch_failed = True
-    if fetch_failed or not bio:
+        if bio and image_url:
+            break
+    if (not bio or not image_url) and get_artist_name(artist):
+        for search_artist in await _search_artist_candidates(
+            client,
+            get_artist_name(artist),
+        ):
+            if not bio:
+                bio = _extract_artist_bio(search_artist)
+            if not image_url:
+                image_url = image_loader.resolve_media_item_image_url(
+                    client,
+                    search_artist,
+                    app.server_url,
+                )
+            if bio and image_url:
+                break
+            for item_id, provider_id in _collect_artist_lookup_candidates(
+                search_artist,
+                None,
+            ):
+                try:
+                    full_artist = await client.music.get_artist(
+                        item_id,
+                        provider_id,
+                    )
+                except Exception:
+                    continue
+                if not bio:
+                    bio = _extract_artist_bio(full_artist)
+                if not image_url:
+                    image_url = image_loader.resolve_media_item_image_url(
+                        client,
+                        full_artist,
+                        app.server_url,
+                    )
+                if bio and image_url:
+                    break
+            if bio and image_url:
+                break
+    if not bio:
         fallback_bio = _extract_artist_bio(artist)
+        if fallback_bio:
+            bio = fallback_bio
+    if not image_url:
         fallback_image_url = _extract_artist_image_url(
             artist,
             app.server_url,
         )
-        if fallback_bio:
-            bio = fallback_bio
         if fallback_image_url:
             image_url = fallback_image_url
     return bio, image_url
+
+
+async def _search_artist_candidates(
+    client: MusicAssistantClient,
+    artist_name: str,
+) -> list[object]:
+    normalized_name = normalize_artist_name(artist_name)
+    if not normalized_name:
+        return []
+    try:
+        search_results = await client.music.search(
+            search_query=artist_name,
+            media_types=[MediaType.ARTIST],
+            limit=10,
+            library_only=False,
+        )
+    except Exception:
+        return []
+    artists = list(getattr(search_results, "artists", None) or [])
+    exact_matches = [
+        item
+        for item in artists
+        if normalize_artist_name(get_artist_name(item)) == normalized_name
+    ]
+    return exact_matches or artists
 
 
 def on_artist_top_tracks_loaded(
@@ -660,8 +1134,8 @@ def on_artist_top_tracks_loaded(
     tracks: list[dict],
     error: str,
 ) -> None:
-    if normalize_artist_name(get_artist_name(artist)) != normalize_artist_name(
-        get_artist_name(getattr(app, "current_artist", None))
+    if _artist_identity(artist) != _artist_identity(
+        getattr(app, "current_artist", None)
     ):
         return
     if error:
@@ -676,8 +1150,8 @@ def on_artist_bio_loaded(
     image_url: str | None,
     error: str,
 ) -> None:
-    if normalize_artist_name(get_artist_name(artist)) != normalize_artist_name(
-        get_artist_name(getattr(app, "current_artist", None))
+    if _artist_identity(artist) != _artist_identity(
+        getattr(app, "current_artist", None)
     ):
         return
     bio_label = getattr(app, "artist_bio_label", None)
